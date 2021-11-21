@@ -48,10 +48,12 @@ class BertClassifer(pl.LightningModule):
         self.bert = BertModel.from_pretrained('bert-base-cased')
         self.dropout = nn.Dropout(dropout)
         self.linear = nn.Sequential(
-            nn.Linear(self.bert.config.hidden_size, self.bert.config.hidden_size*2),
+            nn.Linear(self.bert.config.hidden_size, self.bert.config.hidden_size*4),
             nn.LeakyReLU(),
             nn.Dropout(dropout),
-            nn.Linear(self.bert.config.hidden_size*2, num_class)
+            nn.Linear(self.bert.config.hidden_size*4, self.bert.config.hidden_size),
+            nn.LeakyReLU(),
+            nn.Linear(self.bert.config.hidden_size, num_class)
         )
      
         
@@ -100,8 +102,8 @@ class BertClassifer(pl.LightningModule):
 
         style_pred = self.forward(input_id, mask)
         loss =  F.cross_entropy(style_pred, label)
-        l2_lambda = 0.001
-        l2_reg = torch.tensor(0.)
+        l2_lambda = 0.00001
+        l2_reg = torch.tensor(0.).to(device)
         for param in self.parameters():
             l2_reg += torch.norm(param)
         loss += l2_lambda * l2_reg    
@@ -168,7 +170,7 @@ if __name__ == "__main__":
     lr_monitor_callback = pl.callbacks.LearningRateMonitor()
     checkpoint_callback = ModelCheckpoint(dirpath=save_path, monitor="val_loss", save_top_k=1)
     print('Starting Training')
-    trainer = pl.Trainer(gpus=[6], num_nodes=1, precision=32,
+    trainer = pl.Trainer(gpus=[0], num_nodes=1, precision=32,
                          logger=wandb_logger,
                          check_val_every_n_epoch=1,
                          #overfit_batches=5,
