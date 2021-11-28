@@ -11,6 +11,7 @@ import torchvision
 from torchvision import transforms
 from models.decoderlstm import AttentionGru, BeamSearch
 from train_attention_gru import CaptionAttentionGru
+from hypernet_attention import HyperNet
 from models.encoder import EncoderCNN
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
@@ -36,6 +37,7 @@ if __name__ == "__main__":
     cap_path_romantic = "data/romantic/romantic_train.txt"
     glove_path = "/cortex/users/cohenza4/glove.6B.100d.txt"
     gru_path = "/cortex/users/cohenza4/checkpoint_gru/factual/epoch=18-step=1584.ckpt"
+    hyper_path = "/cortex/users/cohenza4/checkpoint_gru/HN/factual/epoch=39-step=1716.ckpt"
     # data
     with open("data/vocab.pkl", 'rb') as f:
         vocab = pickle.load(f)
@@ -54,10 +56,20 @@ if __name__ == "__main__":
                             shuffle=False, collate_fn=lambda x: flickr_collate_style(x, 'factual'))
 
     # model
-    model = CaptionAttentionGru(200, 200, 200, len(vocab), vocab, lr=0.0003)
-    model = model.load_from_checkpoint(checkpoint_path=gru_path, vocab=vocab)
+    model = HyperNet(200, 200, 200, len(vocab), vocab)
+    #model.load_state_dict(torch.load(hyper_path))
+    model = model.load_from_checkpoint(checkpoint_path=hyper_path, vocab=vocab)
+    rnn = CaptionAttentionGru(200, 200, 200, len(vocab), vocab)
+    rnn = rnn.load_from_checkpoint(checkpoint_path=gru_path, vocab=vocab)
+    model.image_encoder = rnn.image_encoder
+    model.captioner.feature_fc = rnn.captioner.feature_fc
+    model.captioner.embed = rnn.captioner.embed
+    model.captioner.fc = rnn.captioner.fc
+    model.captioner.attention = rnn.captioner.attention
+    model.captioner.init_h = rnn.captioner.init_h
+
     
- 
+
     wandb_logger = WandbLogger(save_dir='/cortex/users/cohenza4')
     wandb_logger.log_hyperparams(model.hparams)
     print('Starting Test')

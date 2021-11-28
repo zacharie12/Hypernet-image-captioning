@@ -219,6 +219,14 @@ def metric_score(gt_caps, pred_caps, vocab, metrics):
     for metric in metrics:
         if metric.name == 'bleu':
             metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
+            output.append(metric.compute(max_order=1)['bleu'])
+            metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
+            output.append(metric.compute(max_order=2)['bleu'])
+            metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
+            output.append(metric.compute(max_order=3)['bleu'])
+            metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
+            output.append(metric.compute(max_order=4)['bleu'])
+            metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
             output.append(metric.compute()['bleu'])
         elif metric.name == 'meteor':
             metric.add_batch(predictions=hyp_batch, references=ref_batch)
@@ -230,6 +238,45 @@ def metric_score(gt_caps, pred_caps, vocab, metrics):
     
     return output
 
+def metric_score_test(gt_caps, pred_caps, vocab, metrics):
+
+    tokenized_hyp_batch = []
+    tokenized_ref_batch = []
+    hyp_batch = []
+    ref_batch = []
+    
+    caps_pred_idx = pred_caps
+    tokenized_hyp_text = cap_to_text_gt(caps_pred_idx, vocab, tokenized=True)
+    hyp_text = cap_to_text_gt(caps_pred_idx, vocab, tokenized=False)
+    hyp_batch.append(hyp_text)
+    tokenized_hyp_batch.append(tokenized_hyp_text)
+
+    for i in range(len(gt_caps)): 
+        gt_idx = torch.squeeze(gt_caps[i])
+        tokenized_ref_text = cap_to_text_gt(gt_idx, vocab, tokenized=True)
+        ref_text = cap_to_text_gt(gt_idx, vocab, tokenized=False)
+        ref_batch.append(ref_text)
+        tokenized_ref_batch.append([tokenized_ref_text])    
+    output = []
+    for metric in metrics:
+        if metric.name == 'bleu':
+            metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
+            output.append(metric.compute(max_order=1)['bleu'])
+            metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
+            output.append(metric.compute(max_order=2)['bleu'])
+            metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
+            output.append(metric.compute(max_order=3)['bleu'])
+            metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
+            output.append(metric.compute(max_order=4)['bleu'])
+        elif metric.name == 'meteor':
+            metric.add_batch(predictions=hyp_batch, references=ref_batch)
+            output.append(metric.compute()['meteor'])
+        elif metric.name == 'rouge':
+            #metric.add_batch(predictions=hyp_batch, references=ref_batch)
+            #output.append(metric.compute()['rougeL'][1][2])
+            output.append(0.0)
+    
+    return output
 
 def sample_multinomial_topk(distribution, k=10):
     distribution_k, idx = torch.topk(distribution, k)

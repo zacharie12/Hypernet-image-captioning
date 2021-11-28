@@ -43,7 +43,7 @@ class FlickrCombiner(torch.utils.data.Dataset):
 
 class Flickr7kDataset(Dataset):
     '''Flickr7k dataset'''
-    def __init__(self, img_dir, caption_file, vocab, transform=None, get_path=False):
+    def __init__(self, img_dir, caption_file, vocab, transform=None, get_path=False, all_caption=False):
         '''
         Args:
             img_dir: Direcutory with all the images
@@ -56,6 +56,7 @@ class Flickr7kDataset(Dataset):
         self.vocab = vocab
         self.transform = transform
         self.get_path = get_path
+        self.all_caption = all_caption
 
     def _get_imgname_and_caption(self, caption_file):
         '''extract image name and caption from factual caption file'''
@@ -93,9 +94,30 @@ class Flickr7kDataset(Dataset):
         caption.extend([self.vocab(token) for token in tokens])
         caption.append(self.vocab('</s>'))
         caption = torch.Tensor(caption)
-        
+
+        all_caption = []
+        if self.all_caption:
+            for i in range(5):
+                idx = ix*5 + i
+            caption = self.imgname_caption_list[idx][1]
+
+            image = skimage.io.imread(img_name)
+            if self.transform is not None:
+                image = self.transform(image)
+
+            # convert caption to word ids
+            r = re.compile("\.")
+            tokens = nltk.tokenize.word_tokenize(r.sub("", caption).lower())
+            caption_i = []
+            caption_i.append(self.vocab('<s>'))
+            caption_i.extend([self.vocab(token) for token in tokens])
+            caption_i.append(self.vocab('</s>'))
+            caption_i = torch.Tensor(caption_i)
+            all_caption.append(caption_i)
         if self.get_path:
             return image, caption, img_name
+        elif self.all_caption:
+            image, caption, all_caption
         else:
             return image, caption
 

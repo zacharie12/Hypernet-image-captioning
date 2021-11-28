@@ -32,11 +32,9 @@ from transformers import BertModel
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class BertClassifer(pl.LightningModule):
-    def __init__(self, vocab_size,vocab, embed_dim, num_class=3, lr=1e-6, dropout=0.2):
+    def __init__(self, vocab, num_class=3, lr=1e-6, dropout=0.2):
         super(BertClassifer, self).__init__()
 
-        self.vocab_size = vocab_size
-        self.embed_dim = embed_dim
         self.vocab = vocab
         self.lr = lr
         self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
@@ -51,9 +49,7 @@ class BertClassifer(pl.LightningModule):
             nn.Linear(self.bert.config.hidden_size, self.bert.config.hidden_size*4),
             nn.LeakyReLU(),
             nn.Dropout(dropout),
-            nn.Linear(self.bert.config.hidden_size*4, self.bert.config.hidden_size),
-            nn.LeakyReLU(),
-            nn.Linear(self.bert.config.hidden_size, num_class)
+            nn.Linear(self.bert.config.hidden_size*4, num_class)
         )
      
         
@@ -95,14 +91,14 @@ class BertClassifer(pl.LightningModule):
             text = cap_to_text_gt(gt_idx, vocab, tokenized=False)
 
         caption = self.tokenizer(text, 
-                               padding='max_length', max_length = 40, truncation=True,
+                               padding='max_length', max_length = 25, truncation=True,
                                 return_tensors="pt") 
         mask = caption['attention_mask'].to(device)
         input_id = caption['input_ids'].squeeze(1).to(device)
 
         style_pred = self.forward(input_id, mask)
         loss =  F.cross_entropy(style_pred, label)
-        l2_lambda = 0.00001
+        l2_lambda = 0.000001
         l2_reg = torch.tensor(0.).to(device)
         for param in self.parameters():
             l2_reg += torch.norm(param)
@@ -124,7 +120,7 @@ class BertClassifer(pl.LightningModule):
             text = cap_to_text_gt(gt_idx, vocab, tokenized=False)
 
         caption = self.tokenizer(text, 
-                               padding='max_length', max_length = 40, truncation=True,
+                               padding='max_length', max_length = 25, truncation=True,
                                 return_tensors="pt")
         mask = caption['attention_mask'].to(device)
         input_id = caption['input_ids'].squeeze(1).to(device)
@@ -158,19 +154,19 @@ if __name__ == "__main__":
                len(data_concat) - int(len(data_concat)*0.8)]
     train_data, val_data = torch.utils.data.random_split(data_concat, lengths)
 
-    train_loader = DataLoader(train_data, batch_size=16, num_workers=4,
+    train_loader = DataLoader(train_data, batch_size=32, num_workers=12,
                               shuffle=False,  collate_fn=flickr_collate_fn)
-    val_loader = DataLoader(val_data, batch_size=16, num_workers=4,
+    val_loader = DataLoader(val_data, batch_size=32, num_workers=12,
                             shuffle=False,  collate_fn=flickr_collate_fn)
     # model
-    model = BertClassifer(len(vocab), vocab, embed_dim=200, num_class=3, lr=1e-5)
+    model = BertClassifer(vocab,  num_class=3, lr=1e-5)
     print('Loading GloVe Embedding')
     print(model)
     wandb_logger = WandbLogger(save_dir='/cortex/users/cohenza4')
     lr_monitor_callback = pl.callbacks.LearningRateMonitor()
     checkpoint_callback = ModelCheckpoint(dirpath=save_path, monitor="val_loss", save_top_k=1)
     print('Starting Training')
-    trainer = pl.Trainer(gpus=[0], num_nodes=1, precision=32,
+    trainer = pl.Trainer(gpus=[5], num_nodes=1, precision=32,
                          logger=wandb_logger,
                          check_val_every_n_epoch=1,
                          #overfit_batches=5,
