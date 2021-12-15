@@ -226,15 +226,13 @@ def metric_score(gt_caps, pred_caps, vocab, metrics):
             output.append(metric.compute(max_order=3)['bleu'])
             metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
             output.append(metric.compute(max_order=4)['bleu'])
-            metric.add_batch(predictions=tokenized_hyp_batch, references=tokenized_ref_batch)
-            output.append(metric.compute()['bleu'])
         elif metric.name == 'meteor':
             metric.add_batch(predictions=hyp_batch, references=ref_batch)
             output.append(metric.compute()['meteor'])
         elif metric.name == 'rouge':
-            #metric.add_batch(predictions=hyp_batch, references=ref_batch)
-            #output.append(metric.compute()['rougeL'][1][2])
-            output.append(0.0)
+            metric.add_batch(predictions=hyp_batch, references=ref_batch)
+            output.append(metric.compute()['rougeL'][1][2])
+            #output.append(0.0)
     
     return output
 
@@ -272,9 +270,9 @@ def metric_score_test(gt_caps, pred_caps, vocab, metrics):
             metric.add_batch(predictions=hyp_batch, references=ref_batch)
             output.append(metric.compute()['meteor'])
         elif metric.name == 'rouge':
-            #metric.add_batch(predictions=hyp_batch, references=ref_batch)
-            #output.append(metric.compute()['rougeL'][1][2])
-            output.append(0.0)
+            metric.add_batch(predictions=hyp_batch, references=ref_batch)
+            output.append(metric.compute()['rougeL'][1][2])
+            #output.append(0.0)
     
     return output
 

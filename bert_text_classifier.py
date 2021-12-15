@@ -82,55 +82,63 @@ class BertClassifer(pl.LightningModule):
         #return optimizer
   
     def training_step(self, train_batch, batch_idx):
-        total_acc_train , total_count = 0, 0
-
+        acc , total_count = 0, 0
+        loss = torch.tensor(0.0).to(device)
         imgs, (style, (caps, lengths)) = train_batch
         label = torch.tensor([self.labels[style]]).to(device)
         for i in range(len(caps)):
             gt_idx = torch.squeeze(caps[i])
-            text = cap_to_text_gt(gt_idx, vocab, tokenized=False)
+            text = cap_to_text_gt(gt_idx, self.vocab, tokenized=False)
+            caption = self.tokenizer(text, 
+                                padding='max_length', max_length = 25, truncation=True,
+                                    return_tensors="pt") 
 
-        caption = self.tokenizer(text, 
-                               padding='max_length', max_length = 25, truncation=True,
-                                return_tensors="pt") 
-        mask = caption['attention_mask'].to(device)
-        input_id = caption['input_ids'].squeeze(1).to(device)
+            mask = caption['attention_mask'].to(device)
+            input_id = caption['input_ids'].squeeze(1).to(device)
 
-        style_pred = self.forward(input_id, mask)
-        loss =  F.cross_entropy(style_pred, label)
-        l2_lambda = 0.000001
-        l2_reg = torch.tensor(0.).to(device)
-        for param in self.parameters():
-            l2_reg += torch.norm(param)
-        loss += l2_lambda * l2_reg    
-        acc = (style_pred.argmax(dim=1) == label).sum().item()
-        total_acc_train += acc
+            style_pred = self.forward(input_id, mask)
+            loss +=  F.cross_entropy(style_pred, label)
+            l2_lambda = 0.000001
+            l2_reg = torch.tensor(0.).to(device)
+            for param in self.parameters():
+                l2_reg += torch.norm(param)
+            loss += l2_lambda * l2_reg    
+            acc += (style_pred.argmax(dim=1) == label).sum().item()
+
+        loss /= len(caps)     
+        mean_acc = acc / len(caps)
         self.log('train_loss', loss)
-        self.log('Train accuracy', acc)
+        self.log('Train accuracy', mean_acc)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
-        total_acc_train , total_count = 0, 0
-
+        acc , total_count = 0, 0
+        loss = torch.tensor(0.0).to(device)
         imgs, (style, (caps, lengths)) = val_batch
         label = torch.tensor([self.labels[style]]).to(device)
-    
         for i in range(len(caps)):
             gt_idx = torch.squeeze(caps[i])
-            text = cap_to_text_gt(gt_idx, vocab, tokenized=False)
+            text = cap_to_text_gt(gt_idx, self.vocab, tokenized=False)
+            caption = self.tokenizer(text, 
+                                padding='max_length', max_length = 25, truncation=True,
+                                    return_tensors="pt") 
 
-        caption = self.tokenizer(text, 
-                               padding='max_length', max_length = 25, truncation=True,
-                                return_tensors="pt")
-        mask = caption['attention_mask'].to(device)
-        input_id = caption['input_ids'].squeeze(1).to(device)
+            mask = caption['attention_mask'].to(device)
+            input_id = caption['input_ids'].squeeze(1).to(device)
 
-        style_pred = self.forward(input_id, mask)
-        loss =  F.cross_entropy(style_pred, label)    
-        acc = (style_pred.argmax(dim=1) == label).sum().item()
-        total_acc_train += acc
+            style_pred = self.forward(input_id, mask)
+            loss +=  F.cross_entropy(style_pred, label)
+            l2_lambda = 0.000001
+            l2_reg = torch.tensor(0.).to(device)
+            for param in self.parameters():
+                l2_reg += torch.norm(param)
+            loss += l2_lambda * l2_reg    
+            acc += (style_pred.argmax(dim=1) == label).sum().item()
+
+        loss /= len(caps)     
+        mean_acc = acc / len(caps)
         self.log('val_loss', loss)
-        self.log('val accuracy', acc)
+        self.log('val accuracy', mean_acc)
 
 if __name__ == "__main__":
     img_path = "data/flickr7k_images"
@@ -139,7 +147,7 @@ if __name__ == "__main__":
     cap_path_romantic = "data/romantic/romantic_train.txt"
     glove_path = "/cortex/users/cohenza4/glove.6B.200d.txt"
     gru_path = "/cortex/users/cohenza4/checkpoint_gru/small_factual/epoch=43-step=1892.ckpt"
-    save_path = "/cortex/users/cohenza4/checkpoint_gru/classifier/"
+    save_path = "/cortex/users/cohenza4/checkpoint/style_classifier/"
     # data
     with open("data/vocab.pkl", 'rb') as f:
         vocab = pickle.load(f)
@@ -166,7 +174,7 @@ if __name__ == "__main__":
     lr_monitor_callback = pl.callbacks.LearningRateMonitor()
     checkpoint_callback = ModelCheckpoint(dirpath=save_path, monitor="val_loss", save_top_k=1)
     print('Starting Training')
-    trainer = pl.Trainer(gpus=[5], num_nodes=1, precision=32,
+    trainer = pl.Trainer(gpus=[1], num_nodes=1, precision=32,
                          logger=wandb_logger,
                          check_val_every_n_epoch=1,
                          #overfit_batches=5,

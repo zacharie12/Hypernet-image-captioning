@@ -35,7 +35,9 @@ if __name__ == "__main__":
     cap_path_humor = "data/humor/funny_train.txt"
     cap_path_romantic = "data/romantic/romantic_train.txt"
     glove_path = "/cortex/users/cohenza4/glove.6B.100d.txt"
-    gru_path = "/cortex/users/cohenza4/checkpoint_gru/factual/epoch=18-step=1584.ckpt"
+    gru_factual = "/cortex/users/cohenza4/checkpoint_gru/factual/epoch=51-step=4488.ckpt"
+    gru_humour = "/cortex/users/cohenza4/checkpoint_gru/gru_pretrain_humour/epoch=21-step=1848.ckpt"
+    gru_romantic = "/cortex/users/cohenza4/checkpoint_gru/gru_pretrain_romantic/epoch=23-step=2024.ckpt"
     # data
     with open("data/vocab.pkl", 'rb') as f:
         vocab = pickle.load(f)
@@ -55,12 +57,12 @@ if __name__ == "__main__":
 
     # model
     model = CaptionAttentionGru(200, 200, 200, len(vocab), vocab, lr=0.0003)
-    model = model.load_from_checkpoint(checkpoint_path=gru_path, vocab=vocab)
+    model = model.load_from_checkpoint(checkpoint_path=gru_factual, vocab=vocab)
     
  
     wandb_logger = WandbLogger(save_dir='/cortex/users/cohenza4')
     wandb_logger.log_hyperparams(model.hparams)
     print('Starting Test')
-    trainer = pl.Trainer(gpus=[6], num_nodes=1, precision=32)                                
+    trainer = pl.Trainer(gpus=[1], num_nodes=1, precision=32)                                
     trainer.test(model, test_loader)
   
