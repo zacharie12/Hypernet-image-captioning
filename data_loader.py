@@ -398,7 +398,7 @@ if __name__ == "__main__":
                len(data_concat) - (int(len(data_concat)*0.8) + int(len(data_concat)*0.1))]
     train_data, val_data, test_data = torch.utils.data.random_split(data_concat, lengths)
     train_loader = DataLoader(train_data, batch_size=64, num_workers=24,
-                            shuffle=False, collate_fn= flickr_collate_fn_essence)
+                            shuffle=False, collate_fn=flickr_collate_fn)
                          
     val_loader = DataLoader(val_data, batch_size=64, num_workers=24,
                             shuffle=False, collate_fn=flickr_collate_fn)

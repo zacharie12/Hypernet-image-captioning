@@ -37,9 +37,9 @@ if __name__ == "__main__":
     cap_path_romantic = "data/romantic/romantic_train.txt"
     glove_path = "/cortex/users/cohenza4/glove.6B.100d.txt"
     gru_path = "/cortex/users/cohenza4/checkpoint_gru/factual/epoch=18-step=1584.ckpt"
-    hyper_factual = "/cortex/users/cohenza4/checkpoint_gru/HN/factual/epoch=39-step=1716.ckpt"
-    hyper_humour = "/cortex/users/cohenza4/checkpoint/HN_reg/romantic/epoch=34-step=2992.ckpt"
-    hyper_romantic =  "/cortex/users/cohenza4/checkpoint/HN_reg/romantic/epoch=34-step=2992.ckpt"
+    hyper_factual = "/cortex/users/cohenza4/checkpoint/HN/factual/epoch=32-step=2816.ckpt"
+    hyper_humour = "/cortex/users/cohenza4/checkpoint/HN/humour/epoch=13-step=1144.ckpt"
+    hyper_romantic =  "/cortex/users/cohenza4/checkpoint/HN/romantic/epoch=14-step=1232.ckpt"
     hyper_all = "/cortex/users/cohenza4/checkpoint_gru/HN/all/epoch=39-step=1716.ckpt"
     hyper_factual_pretrain = "/cortex/users/cohenza4/checkpoint_gru/HN/pretrain/factual/epoch=64-step=5632.ckpt"
     hyper_humour_pretrain = "/cortex/users/cohenza4/checkpoint_gru/HN/pretrain/humour/epoch=53-step=4664.ckpt"
@@ -60,12 +60,12 @@ if __name__ == "__main__":
     train_data, val_data, test_data = torch.utils.data.random_split(data_concat, lengths)
 
     test_loader = DataLoader(test_data, batch_size=1, num_workers=1,
-                            shuffle=False, collate_fn=lambda x: flickr_collate_style(x, 'romantic'))
+                            shuffle=False, collate_fn=lambda x: flickr_collate_style(x, 'factual'))
 
     # model
     model = HyperNet(200, 200, 200, len(vocab), vocab)
     #model.load_state_dict(torch.load(hyper_humour))
-    model = model.load_from_checkpoint(checkpoint_path=hyper_humour, vocab=vocab)
+    model = model.load_from_checkpoint(checkpoint_path=hyper_factual, vocab=vocab)
     '''
     rnn = CaptionAttentionGru(200, 200, 200, len(vocab), vocab)
     rnn = rnn.load_from_checkpoint(checkpoint_path=gru_path, vocab=vocab)
@@ -82,6 +82,6 @@ if __name__ == "__main__":
     wandb_logger = WandbLogger(save_dir='/cortex/users/cohenza4')
     wandb_logger.log_hyperparams(model.hparams)
     print('Starting Test')
-    trainer = pl.Trainer(gpus=[0],num_nodes=1, precision=32)                                
+    trainer = pl.Trainer(gpus=[2],num_nodes=1, precision=32)                                
     trainer.test(model, test_loader)
   

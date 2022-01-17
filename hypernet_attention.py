@@ -30,7 +30,7 @@ import random
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class HyperNet(pl.LightningModule):
-    def __init__(self, feature_size, embed_size, hidden_size, vocab_size, vocab, num_layers=1, lr=1e-6, mixup=False, alpha=0.3):
+    def __init__(self, feature_size, embed_size, hidden_size, vocab_size, vocab, num_layers=1, lr=1e-6, mixup=False, alpha=0.3, cc=False, hyper_emb=10):
         super().__init__()
 
         self.hparams['feature_size'] = feature_size
@@ -50,14 +50,19 @@ class HyperNet(pl.LightningModule):
         # create image encoder
         self.image_encoder = EncoderCNN()
             
-        self.captioner = AttentionGru(2048, feature_size, embed_size, hidden_size, vocab_size, num_layers=num_layers, p=0.0)
+        self.captioner = AttentionGru(2048, feature_size, embed_size, hidden_size, vocab_size, p=0.0)
         # create HN base
         N = 1
         M = 500
+        if cc:
+            hyper_emb = hyper_emb
+        else:
+            hyper_emb = embed_size
+
         self.hn_base = nn.Sequential(
-            nn.Linear(embed_size, N*embed_size),
+            nn.Linear(hyper_emb, N*hyper_emb),
             nn.LeakyReLU(),
-            nn.Linear(N*embed_size, N*embed_size),
+            nn.Linear(N*hyper_emb, N*hyper_emb),
             nn.LeakyReLU()
         )
         self.hn_heads = []
@@ -70,22 +75,22 @@ class HyperNet(pl.LightningModule):
                 continue
 
             w_size = len(W.flatten())
-            if w_size < N*embed_size:
+            if w_size < N*hyper_emb:
                 self.hn_heads.append(nn.Sequential(
-                    nn.Linear(N*embed_size, N),
+                    nn.Linear(N*hyper_emb, N),
                     nn.LeakyReLU(),
                     nn.Linear(w_size, w_size)
                 ))
             else:
-                if w_size // M < N*embed_size:
+                if w_size // M < N*hyper_emb:
                     self.hn_heads.append(nn.Sequential(
-                        nn.Linear(N*embed_size, N*embed_size),
+                        nn.Linear(N*hyper_emb, N*hyper_emb),
                         nn.LeakyReLU(),
-                        nn.Linear(N*embed_size, w_size)
+                        nn.Linear(N*hyper_emb, w_size)
                     ))
                 else:
                     self.hn_heads.append(nn.Sequential(
-                        nn.Linear(N*embed_size, w_size//M),
+                        nn.Linear(N*hyper_emb, w_size//M),
                         nn.LeakyReLU(),
                         nn.Linear(w_size//M, w_size)
                     ))
@@ -351,13 +356,13 @@ if __name__ == "__main__":
     cap_path_humor = "data/humor/funny_train.txt"
     cap_path_romantic = "data/romantic/romantic_train.txt"
     glove_path = "/cortex/users/cohenza4/glove.6B.200d.txt"
-    path_hn_factual= "/cortex/users/cohenza4/checkpoint_gru/hn/hn_factual.ckpt"
-    path_hn_humour= "/cortex/users/cohenza4/checkpoint_gru/hn/hn_humour.pt"
-    path_hn_romantic= "/cortex/users/cohenza4/checkpoint_gru/hn/hn_romantic.pt"
-    path_all = "/cortex/users/cohenza4/checkpoint_gru/hn/hn_all.pt"
-    gru_path = "/cortex/users/cohenza4/checkpoint_gru/factual/epoch=18-step=1584.ckpt"
-    style_classifier_path = "/cortex/users/cohenza4/checkpoint/style_classifier/epoch=8-step=1574.ckpt"
-    save_path = "/cortex/users/cohenza4/checkpoint/HN/romantic/"
+    path_hn_factual= "/cortex/users/cohenza4/checkpoint/hn/hn_factual.pt"
+    path_hn_humour= "/cortex/users/cohenza4/checkpoint/hn/hn_humour.pt"
+    path_hn_romantic= "/cortex/users/cohenza4/checkpoint/hn/hn_romantic.pt"
+    path_all = "/cortex/users/cohenza4/checkpoint/hn/hn_all.pt"
+    gru_path = "/cortex/users/cohenza4/checkpoint/factual/epoch=21-step=1848.ckpt"
+    style_classifier_path = "/cortex/users/cohenza4/checkpoint/style_classifier/epoch=19-step=3499.ckpt"
+    save_path = "/cortex/users/cohenza4/checkpoint/HN/all_pretrain_style/"
 
     # data
     with open("data/vocab.pkl", 'rb') as f:
@@ -379,8 +384,8 @@ if __name__ == "__main__":
     lengths = [int(len(data_concat)*0.8), int(len(data_concat)*0.1),
                len(data_concat) - (int(len(data_concat)*0.8) + int(len(data_concat)*0.1))]
     train_data, val_data, test_data = torch.utils.data.random_split(data_concat, lengths)
-
     
+    '''
     test_loader = DataLoader(test_data, batch_size=1, num_workers=1,
                             shuffle=False, collate_fn=lambda x: flickr_collate_style(x, 'romantic'))
     
@@ -390,22 +395,29 @@ if __name__ == "__main__":
     val_loader = DataLoader(val_data, batch_size=64, num_workers=24,
                             shuffle=False, collate_fn=lambda x: flickr_collate_style(x, 'romantic'))                     
     '''  
-    train_loader = DataLoader(train_data, batch_size=64, num_workers=24,
+    train_loader = DataLoader(train_data, batch_size=1, num_workers=24,
                             shuffle=False, collate_fn= flickr_collate_fn)
                          
-    val_loader = DataLoader(val_data, batch_size=64, num_workers=24,
+    val_loader = DataLoader(val_data, batch_size=1, num_workers=24,
                             shuffle=False, collate_fn=flickr_collate_fn)
+
+    test_loader_fac = DataLoader(test_data, batch_size=1, num_workers=1,
+                            shuffle=False, collate_fn=lambda x: flickr_collate_style(x, 'factual')) 
+    test_loader_hum = DataLoader(test_data, batch_size=1, num_workers=1,
+                            shuffle=False, collate_fn=lambda x: flickr_collate_style(x, 'humour'))                           
+    test_loader_rom = DataLoader(test_data, batch_size=1, num_workers=1,
+                            shuffle=False, collate_fn=lambda x: flickr_collate_style(x, 'romantic'))                                             
     
-    '''
+    
     # model
     model = HyperNet(200, 200, 200, len(vocab), vocab, mixup=False)
-    style_loss =True
+    style_loss =False
     if style_loss:
         style_classifier = BertClassifer(vocab,  num_class=3).to(device)
         style_classifier.load_from_checkpoint(checkpoint_path=style_classifier_path, vocab=vocab).to(device)
     load_checkpoint = False
     if load_checkpoint:
-        model.load_state_dict(torch.load(path_hn_humour))
+        model.load_state_dict(torch.load(path_all))
         rnn = CaptionAttentionGru(200, 200, 200, len(vocab), vocab)
         rnn = rnn.load_from_checkpoint(checkpoint_path=gru_path, vocab=vocab)
         model.image_encoder = rnn.image_encoder
@@ -423,18 +435,23 @@ if __name__ == "__main__":
     lr_monitor_callback = pl.callbacks.LearningRateMonitor()
     checkpoint_callback = ModelCheckpoint(dirpath=save_path, monitor="val_loss with TF", save_top_k=1)
     print('Starting Training')
-    trainer = pl.Trainer(gpus=[7], num_nodes=1, precision=32,
+    trainer = pl.Trainer(gpus=[1], num_nodes=1, precision=32,
                          logger=wandb_logger,
                          #overfit_batches = 1,
                          check_val_every_n_epoch=1,
                          default_root_dir=save_path,
                          log_every_n_steps=20,
-                         auto_lr_find=True,
+                         auto_lr_find=False,
                          callbacks=[lr_monitor_callback, checkpoint_callback],
                          #accelerator='ddp',
-                         max_epochs=55,
+                         max_epochs=20,
                          gradient_clip_val=5.,
                          )
     trainer.tune(model, train_loader, val_loader)
     trainer.fit(model, train_loader, val_loader)
-    trainer.test(model, test_loader)
+    #trainer.test(model, test_loader)
+    
+    trainer.test(model, test_loader_fac)
+    trainer.test(model, test_loader_hum)
+    trainer.test(model, test_loader_rom)
+    

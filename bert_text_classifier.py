@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 import torchvision
 from torchvision import transforms
-from models.decoderlstm import AttentionGru, BeamSearch
+from models.decoderlstm import AttentionGru
 from models.encoder import EncoderCNN
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl

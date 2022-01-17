@@ -83,7 +83,7 @@ class BertEssenceClassifer(pl.LightningModule):
         #return optimizer
   
     def training_step(self, train_batch, batch_idx):
-        total_acc_train , total_count = 0, 0
+        total_acc_train , total_count, cnt_label_pos, acc_pos, acc_neg = 0, 0, 0, 0, 0
         loss = torch.tensor(0.0).to(device)
         mask_fac, mask_hum, mask_rom, input_id_fac, input_id_hum, input_id_rom = [], [], [], [], [], []
         imgs,((style_fac,(cap_fac,len_fac)), (style_hum,(cap_hum,len_hum)),(style_rom,(cap_rom,len_rom))) = train_batch
@@ -115,58 +115,124 @@ class BertEssenceClassifer(pl.LightningModule):
 
         #loop  all the combination with 3 style and and n images when it's the same image label is 1 else 0
         n = len(cap_fac)
-        num_com = (3*n) * (3*n -1)/2
-        for i in range(3*n):
-            for j in range(i+1, 3*n):
-                im_idx1 = i // 3
-                im_idx2 = (j) // 3
-                style_idx1 = i % 3
-                style_idx2 = (j) % 3
-                gt = 'same img' if im_idx1 == im_idx2 else 'diff img'
-                label = torch.tensor([self.labels[gt]]).to(device)
-                if style_idx1 == 0:
-                    input_id1 = input_id_fac[im_idx1]
-                    mask1 = mask_fac[im_idx1]
-                elif style_idx1 == 1:
-                    input_id1 = input_id_hum[im_idx1] 
-                    mask1 = mask_hum[im_idx1] 
-                else:
-                    input_id1 = input_id_rom[im_idx1] 
-                    mask1 = mask_rom[im_idx1] 
-
-                if style_idx2 == 0:
-                    input_id2 = input_id_fac[im_idx2]
-                    mask2 = mask_fac[im_idx2]
-                elif style_idx2 == 1:
-                    input_id2 = input_id_hum[im_idx2] 
-                    mask2 = mask_hum[im_idx2] 
-                else:
-                    input_id2 = input_id_rom[im_idx2] 
-                    mask2 = mask_rom[im_idx2]          
+        #num_com = (3*n) * (3*n -1)/2
+        for i in range(n):
+            j = (i + 1) % n
+            gt = 'same img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            input_id1 = input_id_fac[i]
+            mask1 = mask_fac[i]
+            input_id2 = input_id_hum[i]
+            mask2 = mask_hum[i]
             pred = self.forward(input_id1, mask1, input_id2, mask2)
             pred_label_int = 1 if pred > 0.0 else 0
             pred_label = torch.tensor([pred_label_int]).to(device)
             if pred_label == label:
                 total_acc_train += 1 
+            total_count += 1
             pred = pred.to(torch.float32)
             label = label.to(torch.float32)
-            if label == 0:
-                loss +=  (2/n) * F.mse_loss(pred, label)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'diff img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            style_2 = random.randint(0,2)
+            if style_2 == 0:
+                input_id2 = input_id_fac[j]
+                mask2 = mask_fac[j]
+            elif style_2 == 1:
+                input_id2 = input_id_hum[j] 
+                mask2 = mask_hum[j] 
             else:
-                loss +=  F.mse_loss(pred, label)           
+                input_id2 = input_id_rom[j] 
+                mask2 = mask_rom[j]
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc_train += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'same img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            input_id2 = input_id_rom[i]
+            mask2 = mask_rom[i]
+            pred = self.forward(input_id1, mask1, input_id2, mask2)
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc_train += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'diff img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            style_2 = random.randint(0,2)
+            if style_2 == 0:
+                input_id1 = input_id_fac[j]
+                mask1 = mask_fac[j]
+            elif style_2 == 1:
+                input_id1 = input_id_hum[j] 
+                mask1 = mask_hum[j] 
+            else:
+                input_id1 = input_id_rom[j] 
+                mask1 = mask_rom[j]
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc_train += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'same img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            input_id1 = input_id_hum[i]
+            mask1 = mask_hum[i]
+            pred = self.forward(input_id1, mask1, input_id2, mask2)
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc_train += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'diff img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            style_2 = random.randint(0,2)
+            if style_2 == 0:
+                input_id2 = input_id_fac[j]
+                mask2 = mask_fac[j]
+            elif style_2 == 1:
+                input_id2 = input_id_hum[j] 
+                mask2 = mask_hum[j] 
+            else:
+                input_id2 = input_id_rom[j] 
+                mask2 = mask_rom[j]
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc_train += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
             l2_lambda = 0.000001
             l2_reg = torch.tensor(0.).to(device)
             for param in self.parameters():
                 l2_reg += torch.norm(param)
             loss += l2_lambda * l2_reg 
-
-        total_acc_train /= num_com
+            
+        total_acc_train /= total_count
         self.log('train_loss', loss)
         self.log('Train accuracy', total_acc_train)
         return loss
 
     def validation_step(self, val_batch, batch_idx):
-        total_acc , total_count = 0, 0
+        total_acc , total_count, cnt_label_pos = 0, 0, 0
         loss = torch.tensor(0.0).to(device)
         mask_fac, mask_hum, mask_rom, input_id_fac, input_id_hum, input_id_rom = [], [], [], [], [], []
         imgs,((style_fac,(cap_fac,len_fac)), (style_hum,(cap_hum,len_hum)),(style_rom,(cap_rom,len_rom))) = val_batch
@@ -197,46 +263,111 @@ class BertEssenceClassifer(pl.LightningModule):
 
         #loop  all the combination with 3 style and and n images when it's the same image label is 1 else 0
         n = len(cap_fac)
-        num_com = (3*n) * (3*n -1)/2
-        for i in range(3*n):
-            for j in range(i+1, 3*n):
-                im_idx1 = i // 3
-                im_idx2 = (j) // 3
-                style_idx1 = i % 3
-                style_idx2 = (j) % 3
-                gt = 'same img' if im_idx1 == im_idx2 else 'diff img'
-                label = torch.tensor([self.labels[gt]]).to(device)
-                if style_idx1 == 0:
-                    input_id1 = input_id_fac[im_idx1]
-                    mask1 = mask_fac[im_idx1]
-                elif style_idx1 == 1:
-                    input_id1 = input_id_hum[im_idx1] 
-                    mask1 = mask_hum[im_idx1] 
-                else:
-                    input_id1 = input_id_rom[im_idx1] 
-                    mask1 = mask_rom[im_idx1] 
-
-                if style_idx2 == 0:
-                    input_id2 = input_id_fac[im_idx2]
-                    mask2 = mask_fac[im_idx2]
-                elif style_idx2 == 1:
-                    input_id2 = input_id_hum[im_idx2] 
-                    mask2 = mask_hum[im_idx2] 
-                else:
-                    input_id2 = input_id_rom[im_idx2] 
-                    mask2 = mask_rom[im_idx2]          
+        for i in range(n):
+            j = (i + 1) % n
+            gt = 'same img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            input_id1 = input_id_fac[i]
+            mask1 = mask_fac[i]
+            input_id2 = input_id_hum[i]
+            mask2 = mask_hum[i]
             pred = self.forward(input_id1, mask1, input_id2, mask2)
-            pred_label_int = 1 if pred > 0.5 else 0
+            pred_label_int = 1 if pred > 0.0 else 0
             pred_label = torch.tensor([pred_label_int]).to(device)
             if pred_label == label:
                 total_acc += 1 
+            total_count += 1
             pred = pred.to(torch.float32)
-            label = label.to(torch.float32)     
-            if label == 0:
-                loss +=  (2/n) * F.mse_loss(pred, label)
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'diff img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            style_2 = random.randint(0,2)
+            if style_2 == 0:
+                input_id2 = input_id_fac[j]
+                mask2 = mask_fac[j]
+            elif style_2 == 1:
+                input_id2 = input_id_hum[j] 
+                mask2 = mask_hum[j] 
             else:
-                loss +=  F.mse_loss(pred, label)           
-        total_acc /= num_com
+                input_id2 = input_id_rom[j] 
+                mask2 = mask_rom[j]
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'same img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            input_id2 = input_id_rom[i]
+            mask2 = mask_rom[i]
+            pred = self.forward(input_id1, mask1, input_id2, mask2)
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'diff img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            style_2 = random.randint(0,2)
+            if style_2 == 0:
+                input_id1 = input_id_fac[j]
+                mask1 = mask_fac[j]
+            elif style_2 == 1:
+                input_id1 = input_id_hum[j] 
+                mask1 = mask_hum[j] 
+            else:
+                input_id1 = input_id_rom[j] 
+                mask1 = mask_rom[j]
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'same img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            input_id1 = input_id_hum[i]
+            mask1 = mask_hum[i]
+            pred = self.forward(input_id1, mask1, input_id2, mask2)
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+            gt = 'diff img'
+            label = torch.tensor([self.labels[gt]]).to(device)
+            style_2 = random.randint(0,2)
+            if style_2 == 0:
+                input_id2 = input_id_fac[j]
+                mask2 = mask_fac[j]
+            elif style_2 == 1:
+                input_id2 = input_id_hum[j] 
+                mask2 = mask_hum[j] 
+            else:
+                input_id2 = input_id_rom[j] 
+                mask2 = mask_rom[j]
+            pred_label_int = 1 if pred > 0.0 else 0
+            pred_label = torch.tensor([pred_label_int]).to(device)
+            if pred_label == label:
+                total_acc += 1 
+            total_count += 1
+            label = label.to(torch.float32)
+            loss +=  F.mse_loss(pred, label) 
+
+        total_acc /= total_count
         self.log('val_loss', loss)
         self.log('val accuracy', total_acc)
 
@@ -267,14 +398,14 @@ if __name__ == "__main__":
     val_loader = DataLoader(val_data, batch_size=32, num_workers=12,
                             shuffle=False,  collate_fn=flickr_collate_fn_essence)
     # model
-    model = BertEssenceClassifer(vocab, lr=1e-5)
+    model = BertEssenceClassifer(vocab, lr=1e-3)
     print('Loading GloVe Embedding')
     print(model)
     wandb_logger = WandbLogger(save_dir='/cortex/users/cohenza4')
     lr_monitor_callback = pl.callbacks.LearningRateMonitor()
     checkpoint_callback = ModelCheckpoint(dirpath=save_path, monitor="val_loss", save_top_k=1)
     print('Starting Training')
-    trainer = pl.Trainer(gpus=[5], num_nodes=1, precision=32,
+    trainer = pl.Trainer(gpus=[7], num_nodes=1, precision=32,
                          logger=wandb_logger,
                          check_val_every_n_epoch=1,
                          #overfit_batches=5,
