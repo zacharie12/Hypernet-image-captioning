@@ -21,7 +21,6 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 from utils import set_all_parameters, flip_parameters_to_tensors, WordVectorLoader, cap_to_text, cap_to_text_gt, metric_score
 import datasets
-from train_gru import CaptionLstm
 from argparse import ArgumentParser
 
 

@@ -9,6 +9,14 @@ from nltk.translate.bleu_score import corpus_bleu, sentence_bleu
 from nltk.translate.meteor_score import single_meteor_score, meteor_score
 from nltk.translate.bleu_score import SmoothingFunction
 from rouge_metric import PyRouge
+import math
+import pandas as pd 
+from sklearn.feature_extraction.text import TfidfTransformer
+from sklearn.feature_extraction.text import CountVectorizer 
+from scipy.spatial import distance
+from sklearn.manifold import TSNE
+from math import log
+from transformers import BertTokenizer
 
 def flip_parameters_to_tensors(module):
     attr = []
@@ -292,3 +300,151 @@ def clean_sentence(output, voc):
     words = [word for word in words if word not in ('<s>', ',', '<pad>', '</s>')]
     sentence = " ".join(words)
     return sentence
+
+#create list of different domain in two files
+def get_domain_list(cap_dir1, cap_dir2):
+    domains = []
+    with open(cap_dir1, 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            x = line.split("     ")
+            domains.append(x[2])
+    with open(cap_dir2, 'r') as f:
+        lines = f.readlines()
+        for line in lines:
+            x = line.split("     ")
+            domains.append(x[2])
+    domains = list(dict.fromkeys(domains))
+    return domains
+
+# create dict where the keys are the domains in file txt and the value are histograme of num of apparance of each word in each domain
+def get_hist_embedding(cap_dir1, vocab, list_domain, do_log = True):
+    counter_per_domain = {}
+    eps = 0.0001
+    for cur_domain in list_domain:
+        counter_word = [0]*(len(vocab)+1)
+        with open(cap_dir1, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                x = line.split("     ")
+                domain = x[2]
+                if cur_domain == domain:
+                    cap = x[1].split(" ")
+                    for word in cap:
+                        try:
+                            counter_word[vocab.w2i[word]] +=1
+                        except KeyError:
+                            counter_word[len(vocab)] +=1
+        if do_log:
+            for i in range(len(counter_word)):
+                counter_word[i] = log(counter_word[i]+eps,10) 
+        counter_per_domain[cur_domain.replace("\n", '')] = counter_word
+    return counter_per_domain
+
+def tfidf_hist(cap_dir1, vocab, list_domain):
+    counter_word = [0]*(len(vocab)+1)
+    tfidf_perdomain ={}
+    str_domain = ''
+    docs = []
+    for cur_domain in list_domain:
+        with open(cap_dir1, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                x = line.split("     ")
+                domain = x[2]
+                if cur_domain == domain:
+                    str_domain += x[1]
+        docs.append(str_domain)
+    cv = CountVectorizer() 
+    word_count_vector = cv.fit_transform(docs)
+    tfidf_transformer=TfidfTransformer(smooth_idf=True,use_idf=True) 
+    tfidf_transformer.fit(word_count_vector)
+    # count matrix 
+    count_vector = cv.transform(docs) 
+    # tf-idf scores 
+    tf_idf_vector = tfidf_transformer.transform(count_vector)
+    for i in range(len(list_domain)):
+        dom_i = tf_idf_vector[i].T.todense().tolist()
+        flat_dom_i= [item for sublist in dom_i for item in sublist]
+        tfidf_perdomain[list_domain[i].replace("\n", '')] = flat_dom_i
+    return tfidf_perdomain
+
+
+def get_jsd_tsne(cap_dir1, vocab, list_domain, num_domain, n_tsne):
+    tsne_domain = {}
+    counter_per_domain = get_hist_embedding(cap_dir1, vocab, list_domain, False)
+    domain_list = list(counter_per_domain.keys())
+    domains_hist = list(counter_per_domain.values())
+    mat_dist = np.zeros((num_domain, num_domain))
+    for row in range(num_domain):
+        for col in range(num_domain):
+            a, b = domains_hist[row], domains_hist[col]
+            mat_dist[row][col] =  distance.jensenshannon(a, b)
+            mat_dist = np.nan_to_num(mat_dist)
+    x_tsne = TSNE(n_components=n_tsne, init='random').fit_transform(mat_dist)
+    for i in range(len(domain_list)):
+        tsne_domain[domain_list[i]] = [x_tsne[:, 0][i], x_tsne[:, 1][i]]
+    return tsne_domain
+    
+
+
+class CustomBertTokenizer(BertTokenizer):
+    def __init__(self, *args, **kwargs):
+        super(CustomBertTokenizer, self).__init__(*args, **kwargs)
+
+    def decode(self, token_ids, skip_special_tokens=True,
+               clean_up_tokenization_spaces=True, end_flags=[]):
+        filtered_tokens = self.convert_ids_to_tokens(
+            token_ids,
+            skip_special_tokens=skip_special_tokens,
+            end_flags=end_flags)
+
+        # To avoid mixing byte-level and unicode for byte-level BPT
+        # we need to build string separatly for added tokens and byte-level tokens
+        # cf. https://github.com/huggingface/transformers/issues/1133
+        sub_texts = []
+        current_sub_text = []
+        for token in filtered_tokens:
+            if skip_special_tokens and token in self.all_special_ids:
+                continue
+            if token in self.added_tokens_encoder:
+                if current_sub_text:
+                    sub_texts.append(self.convert_tokens_to_string(current_sub_text))
+                    current_sub_text = []
+                sub_texts.append(" " + token)
+            else:
+                current_sub_text.append(token)
+        if current_sub_text:
+            sub_texts.append(self.convert_tokens_to_string(current_sub_text))
+        text = ''.join(sub_texts)
+
+        if clean_up_tokenization_spaces:
+            clean_text = self.clean_up_tokenization(text)
+            return clean_text
+        else:
+            return text
+
+    def convert_ids_to_tokens(self, ids, skip_special_tokens=False, end_flags=[]):
+        if isinstance(ids, int):
+            if ids in self.added_tokens_decoder:
+                return self.added_tokens_decoder[ids]
+            else:
+                return self._convert_id_to_token(ids)
+        tokens = []
+        for index in ids:
+            if skip_special_tokens and index in self.all_special_ids:
+                continue
+            if index in end_flags:
+                tokens.append('.')
+                break
+            if index in self.added_tokens_decoder:
+                tokens.append(self.added_tokens_decoder[index])
+            else:
+                tokens.append(self._convert_id_to_token(index))
+        return tokens
+
+tokenizer = CustomBertTokenizer.from_pretrained('.cache/')
+PAD = tokenizer.pad_token_id
+MASK = tokenizer.mask_token_id
+EOS = tokenizer.convert_tokens_to_ids('.')
+num_tokens = tokenizer.vocab_size

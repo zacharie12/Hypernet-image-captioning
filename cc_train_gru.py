@@ -152,11 +152,11 @@ class Gru(pl.LightningModule):
         complete_seqs = []
         complete_seqs_scores = []
         step = 1
-        if self.domain_embeded:
+        if self.domain_embed:
             one_hot_emb = self.one_hot_emb[self.dict_domain[domain]]
-            h = self.init_hidden(encoder_out, one_hot_emb)
+            h = self.captioner.init_hidden(encoder_out, one_hot_emb)
         else:
-            h = self.init_hidden(encoder_out)
+            h = self.captioner.init_hidden(encoder_out)
         while True:
             embeddings = self.captioner.embed(k_prev_words).squeeze(1)  
             if k_prev_words[0][0] == 0:
@@ -236,32 +236,50 @@ class Gru(pl.LightningModule):
         self.log('rouge', rouge)
 
 
+
+    def add_model_specific_args(parent_parser):
+        parser = parent_parser.add_argument_group('Gru')
+        '''
+        parser.add_argument('--img_dir_train', type=str, default='data/200_conceptual_images_train/')
+        parser.add_argument('--img_dir_val_test', type=str, default="data/200_conceptual_images_val/")
+        parser.add_argument('--cap_dir_train', type=str, default='data/train_cap_100.txt')
+        parser.add_argument('--cap_dir_val', type=str, default="data/val_cap_100.txt")
+        parser.add_argument('--cap_dir_test', type=str, default="data/test_cap_100.txt")
+        parser.add_argument('--glove_path', type=str, default="/cortex/users/cohenza4/glove.6B.200d.txt")
+        parser.add_argument('--vocab_path', type=str, default="data/vocab.pkl")
+        parser.add_argument('--save_path', type=str, default='/cortex/users/cohenza4/checkpoint/GRU/')
+        parser.add_argument('--batch_size', type=int, default=32)
+        '''
+        parser.add_argument('--domain_emb', type=bool, default=False)
+        parser.add_argument('--max_epochs', type=int, default=50)
+
 if __name__ == "__main__":
     glove_path = "/cortex/users/cohenza4/glove.6B.200d.txt"
-    img_dir_train = 'data/conceptual_images_train/'
-    img_dir_val_test = 'data/conceptual_images_val/'
-    cap_dir_train = 'data/CC_train.txt'
-    cap_dir_val_test = 'data/CC_val.txt'
-    save_path = "/cortex/users/cohenza4/checkpoint/GRU/emb/"
+    img_dir_train = 'data/200_conceptual_images_train/'
+    img_dir_val_test = 'data/200_conceptual_images_val/'
+    cap_dir_train = 'data/train_cap_100.txt'
+    cap_dir_val = 'data/val_cap_100.txt'
+    cap_dir_test = 'data/test_cap_100.txt'
+    save_path = "/cortex/users/cohenza4/checkpoint/GRU/no_emb/"
     # data
     with open("data/vocab.pkl", 'rb') as f:
         vocab = pickle.load(f)
     train_data = get_dataset(img_dir_train, cap_dir_train, vocab)
-    val_test_data = get_dataset(img_dir_val_test, cap_dir_val_test, vocab)
-
-
-    lengths = [int(len(val_test_data)*0.3), len(val_test_data) - (int(len(val_test_data)*0.3))]
-    print("lengths = ", lengths)
-    val_data, test_data = torch.utils.data.random_split(val_test_data, lengths)
+    val_data = get_dataset(img_dir_val_test, cap_dir_val, vocab)
+    test_data = get_dataset(img_dir_val_test, cap_dir_test, vocab)
+    #val_test_data = get_dataset(img_dir_val_test, cap_dir_val_test, vocab)
+    #lengths = [int(len(val_test_data)*0.3), len(val_test_data) - (int(len(val_test_data)*0.3))]
+    #print("lengths = ", lengths)
+    #val_data, test_data = torch.utils.data.random_split(val_test_data, lengths)
     train_loader = DataLoader(train_data, batch_size=32, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
     val_loader = DataLoader(val_data, batch_size=8, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
-    test_loader = DataLoader(test_data, batch_size=2, num_workers=2,
+    test_loader = DataLoader(test_data, batch_size=1, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
-    list_domain = get_domain_list(cap_dir_train, cap_dir_val_test)
-    domain_emb = True
-    model = Gru(200, 200, 200, len(vocab), vocab, list_domain, 5e-3, domain_emb)                       
+    list_domain = get_domain_list(cap_dir_train, cap_dir_val)
+    domain_emb = False
+    model = Gru(200, 200, 200, len(vocab), vocab, list_domain, 0.001, domain_emb)                       
     print('Loading GloVe Embedding')
     model.load_glove_emb(glove_path)
     print(model)

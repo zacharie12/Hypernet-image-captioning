@@ -20,7 +20,7 @@ from build_vocab import Vocab
 import pickle
 import random
 from pytorch_lightning.loggers import WandbLogger   
-from utils import set_all_parameters, flip_parameters_to_tensors, WordVectorLoader, cap_to_text, cap_to_text_gt, metric_score, metric_score_test, get_domain_list, get_hist_embedding
+from utils import set_all_parameters, flip_parameters_to_tensors, WordVectorLoader, cap_to_text, cap_to_text_gt, metric_score, metric_score_test, get_domain_list, get_hist_embedding, tfidf_hist, get_jsd_tsne
 from pytorch_lightning.callbacks import ModelCheckpoint
 import datasets
 import numpy as np
@@ -40,7 +40,7 @@ from collections import Counter
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class HyperNetCC(pl.LightningModule):
-    def __init__(self, feature_size, embed_size, hidden_size, vocab_size, vocab, list_domain, lr=1e-6, mixup=False, alpha=0.3, hyper_emb=10, embedding = 'one hot'):
+    def __init__(self, feature_size, embed_size, hidden_size, vocab_size, vocab, list_domain, lr=1e-6, mixup=False, alpha=0.3, hyper_emb=10, embedding = 'one hot', n_tsne=2):
         super().__init__()
         train_file ='data/CC_train.txt'
         self.hparams['feature_size'] = feature_size
@@ -56,9 +56,17 @@ class HyperNetCC(pl.LightningModule):
         self.embedding = embedding
         self.metrics = ['bleu', 'meteor', 'rouge']
         self.metrics = [datasets.load_metric(name) for name in self.metrics]
-        self.dict_domain = {}    
-        if embedding == 'histograme':
+        self.dict_domain = {} 
+        self.list_domain = list_domain   
+        self.epoch = 0
+        if embedding == 'histograme tfidf':
+            self.dict_domain = tfidf_hist(train_file, vocab, list_domain)
+        elif embedding == 'histograme log':
             self.dict_domain = get_hist_embedding(train_file, vocab, list_domain)
+        elif embedding == 'histograme':
+            self.dict_domain = get_hist_embedding(train_file, vocab, list_domain, False)
+        elif embedding == 'JSD':
+            self.dict_domain = get_jsd_tsne(train_file, vocab, list_domain, len(list_domain), n_tsne)
         else:
             for i in range(len(list_domain)):
                 self.dict_domain[list_domain[i].replace("\n", '')] = i
@@ -69,11 +77,17 @@ class HyperNetCC(pl.LightningModule):
         elif embedding == 'embedding':
             self.embed = nn.Embedding(len(self.dict_domain), hyper_emb)
             self.hyper_emb = hyper_emb
-        elif embedding == 'histograme':
+        elif embedding == 'histograme log' or embedding == 'histograme tfidf' or embedding == 'histograme':
             self.embed = nn.Sequential(
             nn.Linear(len(vocab)+1, hyper_emb*4),
             nn.LeakyReLU(),
             nn.Linear( hyper_emb*4, hyper_emb),
+            nn.LeakyReLU()
+        )
+            self.hyper_emb = hyper_emb
+        elif embedding == 'JSD':
+            self.embed = nn.Sequential(
+            nn.Linear(n_tsne, hyper_emb),
             nn.LeakyReLU()
         )
             self.hyper_emb = hyper_emb
@@ -82,6 +96,8 @@ class HyperNetCC(pl.LightningModule):
 
     def configure_optimizers(self):
         params = list(self.hypernet.hn_heads.parameters())
+        if not self.embedding == 'one hot':
+            params.extend(list(self.embed.parameters()))
         params.extend(list(self.hypernet.hn_base.parameters()))
         params.extend(list(self.hypernet.captioner.feature_fc.parameters()))
         params.extend(list(self.hypernet.captioner.embed.parameters()))
@@ -115,7 +131,7 @@ class HyperNetCC(pl.LightningModule):
             style_embed = style_embed.type(torch.FloatTensor).to(self.device)
         else:
             domain = self.dict_domain[domain]
-            domain =  torch.tensor(self.embed[domain])
+            domain =  torch.tensor(domain)
             domain = domain.type(torch.FloatTensor).to(self.device)
             style_embed = self.embed(domain)
         captioner = self.hypernet.forward(style_embed)
@@ -136,7 +152,7 @@ class HyperNetCC(pl.LightningModule):
         return loss
 
 
-    def validation_step(self, val_batch, batch_idx):
+    def validation_step(self, val_batch, batch_idx):      
         imgs, caps, lengths, domains = val_batch
         domain = domains[0]
         if self.embedding == "embedding":
@@ -149,7 +165,7 @@ class HyperNetCC(pl.LightningModule):
             style_embed = style_embed.type(torch.FloatTensor).to(self.device)
         else:
             domain = self.dict_domain[domain]
-            domain =  torch.tensor(self.embed[domain])
+            domain =  torch.tensor(domain)
             domain = domain.type(torch.FloatTensor).to(self.device)
             style_embed = self.embed(domain)
         captioner = self.hypernet.forward(style_embed)
@@ -161,7 +177,10 @@ class HyperNetCC(pl.LightningModule):
                                caps.view(-1).long(), ignore_index=self.vocab.w2i['<pad>'])
         
         bleu1, bleu2, bleu3, bleu4, meteor, rouge = metric_score(caps, caps_pred, self.vocab, self.metrics)
-         
+
+        #if self.epoch == 0:
+        #    wandb_logger.log_table(key="table bleu1", columns=self.list_domain, data=bleu1)
+
         self.log('val_loss', loss, sync_dist=True)
         self.log('meteor', meteor)
         self.log('bleu 1', bleu1)
@@ -186,7 +205,7 @@ class HyperNetCC(pl.LightningModule):
             style_embed = style_embed.type(torch.FloatTensor).to(self.device)
         else:
             domain = self.dict_domain[domain]
-            domain =  torch.tensor(self.embed[domain])
+            domain =  torch.tensor(domain)
             domain = domain.type(torch.FloatTensor).to(self.device)
             style_embed = self.embed(domain)
         self.hypernet.captioner = self.hypernet.forward(style_embed)
@@ -288,37 +307,40 @@ class HyperNetCC(pl.LightningModule):
 
 if __name__ == "__main__":
     glove_path = "/cortex/users/cohenza4/glove.6B.200d.txt"
-    img_dir_train = 'data/conceptual_images_train/'
-    img_dir_val_test = 'data/conceptual_images_val/'
-    cap_dir_train = 'data/CC_train.txt'
-    cap_dir_val_test = 'data/CC_val.txt'
-    save_path = "/cortex/users/cohenza4/checkpoint/HN/embedding/"
+    img_dir_train = 'data/200_conceptual_images_train/'
+    img_dir_val_test = 'data/200_conceptual_images_val/'
+    cap_dir_train = 'data/train_cap_100.txt'
+    cap_dir_val = 'data/val_cap_100.txt'
+    cap_dir_test = 'data/test_cap_100.txt'
+    save_path = "/cortex/users/cohenza4/checkpoint/HN/one_hot/"
     # data
     with open("data/vocab.pkl", 'rb') as f:
         vocab = pickle.load(f)
     train_data = get_dataset(img_dir_train, cap_dir_train, vocab)
-    val_test_data = get_dataset(img_dir_val_test, cap_dir_val_test, vocab)
-    lengths = [int(len(val_test_data)*0.3), len(val_test_data) - (int(len(val_test_data)*0.3))]
-    print("lengths = ", lengths)
-    val_data, test_data = torch.utils.data.random_split(val_test_data, lengths)
+    val_data = get_dataset(img_dir_val_test, cap_dir_val, vocab)
+    test_data = get_dataset(img_dir_val_test, cap_dir_test, vocab)
+    #val_test_data = get_dataset(img_dir_val_test, cap_dir_val_test, vocab)
+    #lengths = [int(len(val_test_data)*0.3), len(val_test_data) - (int(len(val_test_data)*0.3))]
+    #print("lengths = ", lengths)
+    #val_data, test_data = torch.utils.data.random_split(val_test_data, lengths)
     train_loader = DataLoader(train_data, batch_size=32, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
     val_loader = DataLoader(val_data, batch_size=8, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
-    test_loader = DataLoader(test_data, batch_size=2, num_workers=2,
+    test_loader = DataLoader(test_data, batch_size=1, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
-    list_domain = get_domain_list(cap_dir_train, cap_dir_val_test)
-    #'histograme', "embedding", "one hot"
-    domain_emb = 'embedding'
-    model = HyperNetCC(200, 200, 200, len(vocab), vocab, list_domain, 5e-3, False, 0.3, 10, domain_emb)                       
+    list_domain = get_domain_list(cap_dir_train, cap_dir_val)
+    #'histograme' 'histograme log' 'histograme tfidf' 'JSD', "embedding", "one hot"
+    domain_emb = 'one hot'
+    model = HyperNetCC(200, 200, 200, len(vocab), vocab, list_domain, 0.001, False, 0.3, 10, domain_emb)                       
     print('Loading GloVe Embedding')
     model.load_glove_emb(glove_path)
     print(model)
-    wandb_logger = WandbLogger(save_dir='/cortex/users/cohenza4')
+    wandb_logger = WandbLogger(save_dir='/cortex/users/cohenza4', log_model='all')
     lr_monitor_callback = pl.callbacks.LearningRateMonitor()
     checkpoint_callback = ModelCheckpoint(dirpath=save_path, monitor="val_loss with TF", save_top_k=1)
     print('Starting Training')
-    trainer = pl.Trainer(gpus=[5], num_nodes=1, precision=32,
+    trainer = pl.Trainer(gpus=[7], num_nodes=1, precision=32,
                          logger=wandb_logger,
                          #overfit_batches = 1,
                          check_val_every_n_epoch=1,
@@ -327,7 +349,7 @@ if __name__ == "__main__":
                          auto_lr_find=False,
                          callbacks=[lr_monitor_callback, checkpoint_callback],
                          #accelerator='ddp',
-                         max_epochs=55,
+                         max_epochs=60,
                          gradient_clip_val=5.,
                          )
     trainer.tune(model, train_loader, val_loader)

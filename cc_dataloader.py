@@ -132,7 +132,25 @@ class ConceptualCaptions(torch.utils.data.Dataset):
             caption = self.imgname_caption_list_domain[1][idx]    
             image = skimage.io.imread(img_name)
             if self.transform is not None:
-                image = self.transform(image)
+                try:
+                    image = self.transform(image)
+                except RuntimeError:
+                    if self.current_domain != None:
+                        if len(self.curr_list) == 0:
+                            self.curr_list = list(range(self.range_domain[self.current_domain][0], self.range_domain[self.current_domain][1]))
+                        #self.curr_list.remove(idx)
+                        idx = random.sample(self.curr_list, 1)[0]
+                        self.curr_list.remove(idx)
+                        domain = self.imgname_caption_list_domain[2][idx]
+                    else:
+                        self.current_domain = domain
+                        self.curr_list = list(range(self.range_domain[self.current_domain][0], self.range_domain[self.current_domain][1]))
+                    img_name = self.imgname_caption_list_domain[0][idx]
+                    img_name = os.path.join(self.img_dir, img_name)
+                    caption = self.imgname_caption_list_domain[1][idx]    
+                    image = skimage.io.imread(img_name)
+                    if self.transform is not None:
+                        image = self.transform(image)
     
         if self.counter == 0:
             self.current_domain = None

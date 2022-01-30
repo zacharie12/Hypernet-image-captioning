@@ -1,3 +1,4 @@
+from charset_normalizer import from_path
 from numpy.core.numeric import False_
 import torch
 from torch import nn
@@ -9,7 +10,7 @@ from torch.utils.data import DataLoader
 from torch.utils.data import random_split
 import torchvision
 from torchvision import transforms
-from models.decoderlstm import AttentionGru, BeamSearch
+from models.decoderlstm import AttentionGru
 from train_attention_gru import CaptionAttentionGru
 from hypernet_attention import HyperNet
 from models.encoder import EncoderCNN
@@ -24,48 +25,44 @@ import pickle
 import random
 from pytorch_lightning.loggers import WandbLogger   
 from pytorch_lightning.callbacks import ModelCheckpoint
-from utils import set_all_parameters, flip_parameters_to_tensors, WordVectorLoader, cap_to_text, cap_to_text_gt, metric_score
+from utils import set_all_parameters, flip_parameters_to_tensors, WordVectorLoader, cap_to_text, cap_to_text_gt, metric_score, metric_score_test, get_domain_list
+from cc_train_hypernet import HyperNetCC
 import datasets
 import dominate
 from dominate.tags import *
+from cc_train_gru import Gru
+from cc_dataloader import ConceptualCaptions, collate_fn, get_dataset
 
 
 if __name__ == "__main__":
-    img_path = "data/flickr7k_images"
-    cap_path = "data/factual_train.txt"
-    cap_path_humor = "data/humor/funny_train.txt"
-    cap_path_romantic = "data/romantic/romantic_train.txt"
-    glove_path = "/cortex/users/cohenza4/glove.6B.100d.txt"
-    gru_path = "/cortex/users/cohenza4/checkpoint_gru/factual/epoch=18-step=1584.ckpt"
-    hyper_factual = "/cortex/users/cohenza4/checkpoint/HN/factual/epoch=32-step=2816.ckpt"
-    hyper_humour = "/cortex/users/cohenza4/checkpoint/HN/humour/epoch=13-step=1144.ckpt"
-    hyper_romantic =  "/cortex/users/cohenza4/checkpoint/HN/romantic/epoch=14-step=1232.ckpt"
-    hyper_all = "/cortex/users/cohenza4/checkpoint_gru/HN/all/epoch=39-step=1716.ckpt"
-    hyper_factual_pretrain = "/cortex/users/cohenza4/checkpoint_gru/HN/pretrain/factual/epoch=64-step=5632.ckpt"
-    hyper_humour_pretrain = "/cortex/users/cohenza4/checkpoint_gru/HN/pretrain/humour/epoch=53-step=4664.ckpt"
-    hyper_romantic_pretrain = "/cortex/users/cohenza4/checkpoint_gru/HN/pretrain/romantic/epoch=59-step=5192.ckpt"
-    hyper_all_pretrain = "/cortex/users/cohenza4/checkpoint_gru/HN/pretrain/all/epoch=40-step=3520.ckpt"
+    glove_path = "/cortex/users/cohenza4/glove.6B.200d.txt"
+    img_dir_train = 'data/200_conceptual_images_train/'
+    img_dir_val_test = 'data/200_conceptual_images_val/'
+    cap_dir_train = 'data/train_cap_100.txt'
+    cap_dir_val = 'data/val_cap_100.txt'
+    cap_dir_test = 'data/test_cap_100.txt'
+    hn_1hot = "/cortex/users/cohenza4/checkpoint/HN/one_hot/epoch=19-step=3259.ckpt"
+    hn_emb = "/cortex/users/cohenza4/checkpoint/HN/embedding/epoch=47-step=7823.ckpt"
+    #hn_hist = "/cortex/users/cohenza4/checkpoint/HN/emb/epoch=44-step=7334.ckpt"
+    hn_hist_log = "/cortex/users/cohenza4/checkpoint/HN/histograme_log/epoch=24-step=4074.ckpt"
+    hn_tfidf = "/cortex/users/cohenza4/checkpoint/HN/histograme_tfidf/epoch=21-step=3585.ckpt"
+    hn_jsd = "/cortex/users/cohenza4/checkpoint/HN/JSD/epoch=25-step=4237.ckpt"
     # data
     with open("data/vocab.pkl", 'rb') as f:
         vocab = pickle.load(f)
     print('Prepairing Data')
-    orig_dataset = get_dataset(img_path, cap_path, vocab)
-    humor_dataset = get_styled_dataset(cap_path_humor, vocab)
-    romantic_dataset = get_styled_dataset(cap_path_romantic, vocab)
+    test_data = get_dataset(img_dir_val_test, cap_dir_test, vocab)
 
-    data_concat = ConcatDataset(orig_dataset, humor_dataset, romantic_dataset)
 
-    lengths = [int(len(data_concat)*0.8), int(len(data_concat)*0.1),
-               len(data_concat) - (int(len(data_concat)*0.8) + int(len(data_concat)*0.1))]
-    train_data, val_data, test_data = torch.utils.data.random_split(data_concat, lengths)
+    test_loader = DataLoader(test_data, batch_size=1, num_workers=2,
+                            shuffle=False, collate_fn= collate_fn)
 
-    test_loader = DataLoader(test_data, batch_size=1, num_workers=1,
-                            shuffle=False, collate_fn=lambda x: flickr_collate_style(x, 'factual'))
-
+    list_domain = get_domain_list(cap_dir_train, cap_dir_val)                 
     # model
-    model = HyperNet(200, 200, 200, len(vocab), vocab)
-    #model.load_state_dict(torch.load(hyper_humour))
-    model = model.load_from_checkpoint(checkpoint_path=hyper_factual, vocab=vocab)
+    #'histograme' 'histograme log' 'histograme tfidf' 'JSD', "embedding", "one hot"
+    domain_emb = 'JSD'
+    model = HyperNetCC(200, 200, 200, len(vocab), vocab, list_domain, 0.001, False, 0.3, 10, domain_emb)  
+    model = model.load_from_checkpoint(checkpoint_path=hn_jsd, vocab=vocab, list_domain=list_domain, embedding=domain_emb)
     '''
     rnn = CaptionAttentionGru(200, 200, 200, len(vocab), vocab)
     rnn = rnn.load_from_checkpoint(checkpoint_path=gru_path, vocab=vocab)
@@ -82,6 +79,6 @@ if __name__ == "__main__":
     wandb_logger = WandbLogger(save_dir='/cortex/users/cohenza4')
     wandb_logger.log_hyperparams(model.hparams)
     print('Starting Test')
-    trainer = pl.Trainer(gpus=[2],num_nodes=1, precision=32)                                
+    trainer = pl.Trainer(gpus=[4],num_nodes=1, precision=32)                                
     trainer.test(model, test_loader)
   

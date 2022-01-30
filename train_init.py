@@ -22,11 +22,10 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 if __name__ == "__main__":
     #lstm_path = ["/cortex/users/algiser/caption-hn"]
-    gru_path_factual = "/cortex/users/cohenza4/checkpoint_gru/factual/epoch=18-step=1584.ckpt"
-    gru_path_romantic = "/cortex/users/cohenza4/checkpoint_gru/gru_pretrain_romantic/epoch=23-step=2024.ckpt"
-    gru_path_humor = "/cortex/users/cohenza4/checkpoint_gru/gru_pretrain_humour/epoch=21-step=1848.ckpt"
-    save_path1 = "/cortex/users/cohenza4/checkpoint_gru/hn/hn_humour.ckpt"
-    save_path2 = "/cortex/users/cohenza4/checkpoint_gru/hn/hn_humour.pt"
+    gru_path_factual = "/cortex/users/cohenza4/checkpoint/factual/epoch=21-step=1848.ckpt"
+    gru_path_romantic = "/cortex/users/cohenza4/checkpoint/romantic/epoch=8-step=704.ckpt"
+    gru_path_humor = "/cortex/users/cohenza4/checkpoint/humour/epoch=19-step=1672.ckpt"
+    save_path = "/cortex/users/cohenza4/checkpoint/hn/hn_all.pt"
 
     with open("data/vocab.pkl", 'rb') as f:
         vocab = pickle.load(f)
@@ -35,7 +34,7 @@ if __name__ == "__main__":
     styles = ['humour']
     #gru = DecoderGRU(200, 150, len(vocab), 2, dropout=False).to('cpu')
     rnn_fact = CaptionAttentionGru(200, 200, 200, len(vocab), vocab).to(device)
-    #rnn_rom = CaptionAttentionGru(200, 200, 200, len(vocab), vocab).to(device)
+    rnn_rom = CaptionAttentionGru(200, 200, 200, len(vocab), vocab).to(device)
     rnn_humor = CaptionAttentionGru(200, 200, 200, len(vocab), vocab).to(device)
 
     #lstms = [model.load_state_dict(lstm_path[i])
@@ -43,10 +42,10 @@ if __name__ == "__main__":
     #rnn.load_state_dict(torch.load(gru_path)) 
     print('Loading RNN')
     rnn_fact = rnn_fact.load_from_checkpoint(checkpoint_path=gru_path_factual, vocab=vocab).to(device)
-    #rnn_rom = rnn_rom.load_from_checkpoint(checkpoint_path=gru_path_romantic, vocab=vocab).to(device)
+    rnn_rom = rnn_rom.load_from_checkpoint(checkpoint_path=gru_path_romantic, vocab=vocab).to(device)
     rnn_humor = rnn_humor.load_from_checkpoint(checkpoint_path=gru_path_humor, vocab=vocab).to(device)
-    #rnns = [rnn_fact, rnn_rom, rnn_humor]
-    rnns = [rnn_humor]
+    rnns = [rnn_fact, rnn_rom, rnn_humor]
+    #rnns = [rnn_rom]
     # model
     print('Initializing Hypernet')
 
@@ -101,6 +100,8 @@ if __name__ == "__main__":
             diff = loss.item()/torch.norm(param)
             print("sum param = ", sum_param, "poucentage is = ", diff)
 
+
+        '''
         if loss.item() < 1e-4 and flag:
             print('Saving hypernet 1')
             torch.save(model.state_dict(), save_path1)
@@ -111,7 +112,12 @@ if __name__ == "__main__":
             torch.save(model.state_dict(), save_path2)
             print('hypernet 2 saved') 
             exit()
- 
+        '''
+        if  loss.item() < 1e-9:  
+            print('Saving hypernet')
+            torch.save(model.state_dict(), save_path)
+            print('hypernet saved') 
+            exit()
         iteration += 1
         loss.backward()
         optimizer.step()
