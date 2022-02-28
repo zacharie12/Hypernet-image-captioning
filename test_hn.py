@@ -41,20 +41,22 @@ if __name__ == "__main__":
     cap_dir_train = 'data/train_cap_100.txt'
     cap_dir_val = 'data/val_cap_100.txt'
     cap_dir_test = 'data/test_cap_100.txt'
-    hn_1hot = "/cortex/users/cohenza4/checkpoint/HN/one_hot/epoch=19-step=3259.ckpt"
-    hn_emb = "/cortex/users/cohenza4/checkpoint/HN/embedding/epoch=47-step=7823.ckpt"
-    #hn_hist = "/cortex/users/cohenza4/checkpoint/HN/emb/epoch=44-step=7334.ckpt"
-    hn_hist_log = "/cortex/users/cohenza4/checkpoint/HN/histograme_log/epoch=24-step=4074.ckpt"
-    hn_tfidf = "/cortex/users/cohenza4/checkpoint/HN/histograme_tfidf/epoch=21-step=3585.ckpt"
-    hn_jsd = "/cortex/users/cohenza4/checkpoint/HN/JSD/epoch=25-step=4237.ckpt"
+    one_shot_images = 'data/one_shot_images/'
+    one_shot_captions = 'data/one_shot_captions.txt'
+    hn_1hot = "/cortex/users/cohenza4/checkpoint/HN/one_hot/epoch=49-step=8149.ckpt"
+    hn_emb = "/cortex/users/cohenza4/checkpoint/HN/embedding/epoch=16-step=2770.ckpt"
+    hn_hist = "/cortex/users/cohenza4/checkpoint/HN/histograme/epoch=25-step=4237.ckpt"
+    hn_hist_log = "/cortex/users/cohenza4/checkpoint/HN/histograme_log/epoch=32-step=5378.ckpt"
+    hn_tfidf = "/cortex/users/cohenza4/checkpoint/HN/histograme_tfidf/epoch=22-step=3748.ckpt"
+    hn_jsd = "/cortex/users/cohenza4/checkpoint/HN/JSD/epoch=19-step=3259.ckpt"
     # data
-    with open("data/vocab.pkl", 'rb') as f:
+    with open("data/vocab_CC.pkl", 'rb') as f:
         vocab = pickle.load(f)
     print('Prepairing Data')
     test_data = get_dataset(img_dir_val_test, cap_dir_test, vocab)
 
 
-    test_loader = DataLoader(test_data, batch_size=1, num_workers=2,
+    test_loader = DataLoader(test_data, batch_size=20, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
 
     list_domain = get_domain_list(cap_dir_train, cap_dir_val)                 
@@ -79,6 +81,6 @@ if __name__ == "__main__":
     wandb_logger = WandbLogger(save_dir='/cortex/users/cohenza4')
     wandb_logger.log_hyperparams(model.hparams)
     print('Starting Test')
-    trainer = pl.Trainer(gpus=[4],num_nodes=1, precision=32)                                
+    trainer = pl.Trainer(gpus=[0],num_nodes=1, precision=32)                                
     trainer.test(model, test_loader)
   

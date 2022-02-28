@@ -40,9 +40,10 @@ from collections import Counter
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 class HyperNetCC(pl.LightningModule):
-    def __init__(self, feature_size, embed_size, hidden_size, vocab_size, vocab, list_domain, lr=1e-6, mixup=False, alpha=0.3, hyper_emb=10, embedding = 'one hot', n_tsne=2):
+    def __init__(self, feature_size, embed_size, hidden_size, vocab_size, vocab, list_domain, lr=1e-6, mixup=False, alpha=0.3, hyper_emb=10, embedding = 'one hot', n_tsne=2, zero_shot=False, list_zeroshot=[]):
         super().__init__()
-        train_file ='data/CC_train.txt'
+        train_file = 'data/train_cap_100.txt'
+        test_file = 'data/one_shot_captions.txt'
         self.hparams['feature_size'] = feature_size
         self.hparams['vocab_size'] = vocab_size
         self.hparams['embed_size'] = embed_size
@@ -61,15 +62,27 @@ class HyperNetCC(pl.LightningModule):
         self.epoch = 0
         if embedding == 'histograme tfidf':
             self.dict_domain = tfidf_hist(train_file, vocab, list_domain)
+            if zero_shot:
+                dict_zero_shot = tfidf_hist(test_file, vocab, list_zeroshot)
+                self.dict_domain.update(dict_zero_shot)
         elif embedding == 'histograme log':
             self.dict_domain = get_hist_embedding(train_file, vocab, list_domain)
+            if zero_shot:
+                dict_zero_shot = get_hist_embedding(test_file, vocab, list_zeroshot)
+                self.dict_domain.update(dict_zero_shot)
         elif embedding == 'histograme':
             self.dict_domain = get_hist_embedding(train_file, vocab, list_domain, False)
+            if zero_shot:
+                dict_zero_shot = get_hist_embedding(test_file, vocab, list_zeroshot, False)
+                self.dict_domain.update(dict_zero_shot)
         elif embedding == 'JSD':
-            self.dict_domain = get_jsd_tsne(train_file, vocab, list_domain, len(list_domain), n_tsne)
+            self.dict_domain = get_jsd_tsne(train_file, vocab, list_domain, len(list_domain)+len(list_zeroshot), n_tsne, zero_shot, list_zeroshot)
         else:
             for i in range(len(list_domain)):
                 self.dict_domain[list_domain[i].replace("\n", '')] = i
+                for j in range(len(list_zeroshot)):
+                        self.dict_domain[list_zeroshot[j].replace("\n", '')] = j+100
+
         if embedding == 'one hot':
             x = torch.tensor(list(self.dict_domain.values()))
             self.embed = torch.nn.functional.one_hot(x, len(self.dict_domain))
@@ -92,7 +105,7 @@ class HyperNetCC(pl.LightningModule):
         )
             self.hyper_emb = hyper_emb
         self.image_encoder = EncoderCNN()
-        self.hypernet = HyperNet(feature_size, feature_size, feature_size, vocab_size, vocab, num_layers=1, lr=1e-6, mixup=False, alpha=0.3, cc=True, hyper_emb=self.hyper_emb )
+        self.hypernet = HyperNet(feature_size, embed_size, hidden_size, vocab_size, vocab, num_layers=1, lr=1e-6, mixup=False, alpha=0.3, cc=True, hyper_emb=self.hyper_emb )
 
     def configure_optimizers(self):
         params = list(self.hypernet.hn_heads.parameters())
@@ -138,17 +151,18 @@ class HyperNetCC(pl.LightningModule):
         img_feats = self.hypernet.image_encoder(imgs.float()) 
         caps_pred, _ = captioner(img_feats, caps.long(), self.teacher_forcing_proba)
         loss =  F.cross_entropy(caps_pred.view(-1, self.hparams['vocab_size']), caps.view(-1).long(), ignore_index=self.vocab.w2i['<pad>'])       
-        bleu1, bleu2, bleu3, bleu4, meteor, rouge = metric_score(caps, caps_pred, self.vocab, self.metrics)
+        bleu1, bleu2, bleu3, bleu4, meteor, rouge, cider = metric_score(caps, caps_pred, self.vocab, self.metrics)
 
         self.log('train_loss', loss)
         self.log('LR', self.hparams['lr'])
-        self.log('TF', self.teacher_forcing_proba)
+        #self.log('TF', self.teacher_forcing_proba)
         self.log('meteor train', meteor)
         self.log('bleu 1 train', bleu1)
         self.log('bleu 2 train', bleu2)
         self.log('bleu 3 train', bleu3)
         self.log('bleu 4 train', bleu4)
         self.log('rouge train', rouge)
+        self.log('cider train', cider)
         return loss
 
 
@@ -176,7 +190,7 @@ class HyperNetCC(pl.LightningModule):
         loss = F.cross_entropy(caps_pred.view(-1, self.hparams['vocab_size']),
                                caps.view(-1).long(), ignore_index=self.vocab.w2i['<pad>'])
         
-        bleu1, bleu2, bleu3, bleu4, meteor, rouge = metric_score(caps, caps_pred, self.vocab, self.metrics)
+        bleu1, bleu2, bleu3, bleu4, meteor, rouge, cider = metric_score(caps, caps_pred, self.vocab, self.metrics)
 
         #if self.epoch == 0:
         #    wandb_logger.log_table(key="table bleu1", columns=self.list_domain, data=bleu1)
@@ -188,10 +202,45 @@ class HyperNetCC(pl.LightningModule):
         self.log('bleu 3', bleu3)
         self.log('bleu 4', bleu4)
         self.log('rouge', rouge)
+        self.log('cider val', cider)
         loss_tf = F.cross_entropy(caps_pred_teacher_forcing.view(-1, self.hparams['vocab_size']),
                                caps.view(-1).long(), ignore_index=self.vocab.w2i['<pad>'])
         self.log('val_loss with TF', loss_tf, sync_dist=True)
 
+
+
+    def test_step(self, test_batch, batch_idx):
+        imgs, caps, lengths, domains = test_batch
+        domain = domains[0]
+        if self.embedding == "embedding":
+            domain = torch.tensor(self.dict_domain[domain])
+            domain = domain.type(torch.LongTensor).to(self.device)
+            style_embed = self.embed(domain)
+        elif self.embedding == 'one hot':
+            domain = self.dict_domain[domain]
+            style_embed = torch.tensor(self.embed[domain])
+            style_embed = style_embed.type(torch.FloatTensor).to(self.device)
+        else:
+            domain = self.dict_domain[domain]
+            domain =  torch.tensor(domain)
+            domain = domain.type(torch.FloatTensor).to(self.device)
+            style_embed = self.embed(domain)
+        captioner = self.hypernet.forward(style_embed)
+        img_feats = self.hypernet.image_encoder(imgs.float())
+        caps_pred, _ = captioner(img_feats, caps.long(), 1.0)
+ 
+        bleu1, bleu2, bleu3, bleu4, meteor, rouge, cider = metric_score(caps, caps_pred, self.vocab, self.metrics)
+
+        self.log('meteor', meteor)
+        self.log('bleu 1', bleu1)
+        self.log('bleu 2', bleu2)
+        self.log('bleu 3', bleu3)
+        self.log('bleu 4', bleu4)
+        self.log('rouge', rouge)
+        self.log('cider val', cider)
+
+
+    '''
     def test_step(self, test_batch, batch_idx):
         imgs, caps, lengths, domains = test_batch
         domain = domains[0]
@@ -285,49 +334,52 @@ class HyperNetCC(pl.LightningModule):
 
 
 
-            bleu1_beam, bleu2_beam, bleu3_beam, bleu4_beam, meteor_beam, rouge_beam = metric_score_test(caps, torch.tensor(caps_pred_beam), self.vocab, self.metrics)
+            bleu1_beam, bleu2_beam, bleu3_beam, bleu4_beam, meteor_beam, rouge_beam, cider_beam = metric_score_test(caps, torch.tensor(caps_pred_beam), self.vocab, self.metrics)
             self.log('meteor beam', meteor_beam)
             self.log('bleu 1 beam', bleu1_beam)
             self.log('bleu 2 beam', bleu2_beam)
             self.log('bleu 3 beam', bleu3_beam)
             self.log('bleu 4 beam', bleu4_beam)
             self.log('rouge beam', rouge_beam)
+            self.log('cider beam', cider_beam)
 
         
         img_feats = self.image_encoder(imgs.float())
         caps_pred, _ = self.hypernet.captioner(img_feats, caps.long(), 1.0)
-        bleu1, bleu2, bleu3, bleu4,  meteor, rouge = metric_score(caps, caps_pred, self.vocab, self.metrics)
+        bleu1, bleu2, bleu3, bleu4,  meteor, rouge, cider = metric_score(caps, caps_pred, self.vocab, self.metrics)
         self.log('meteor', meteor)
-        self.log('bleu 1', bleu1)
-        self.log('bleu 2', bleu2)
-        self.log('bleu 3', bleu3)
-        self.log('bleu 4', bleu4)
-        self.log('rouge', rouge)
+        self.log('bleu 1 test', bleu1)
+        self.log('bleu 2 test', bleu2)
+        self.log('bleu 3 test', bleu3)
+        self.log('bleu 4 test', bleu4)
+        self.log('rouge test', rouge)
+        
+        '''
+        
 
 
 if __name__ == "__main__":
+    #out_cap = train_cap_100.txt
+    #out_img = 200_conceptual_images_train
     glove_path = "/cortex/users/cohenza4/glove.6B.200d.txt"
-    img_dir_train = 'data/200_conceptual_images_train/'
+    img_dir_train = 'data/cc_big_100/'
     img_dir_val_test = 'data/200_conceptual_images_val/'
-    cap_dir_train = 'data/train_cap_100.txt'
+    cap_dir_train = 'data/cc_big_100.txt'
     cap_dir_val = 'data/val_cap_100.txt'
     cap_dir_test = 'data/test_cap_100.txt'
-    save_path = "/cortex/users/cohenza4/checkpoint/HN/one_hot/"
+    save_path = "/cortex/users/cohenza4/checkpoint/HN_big/one_hot/"
     # data
-    with open("data/vocab.pkl", 'rb') as f:
+    with open("data/vocab_CC.pkl", 'rb') as f:
         vocab = pickle.load(f)
     train_data = get_dataset(img_dir_train, cap_dir_train, vocab)
     val_data = get_dataset(img_dir_val_test, cap_dir_val, vocab)
     test_data = get_dataset(img_dir_val_test, cap_dir_test, vocab)
-    #val_test_data = get_dataset(img_dir_val_test, cap_dir_val_test, vocab)
-    #lengths = [int(len(val_test_data)*0.3), len(val_test_data) - (int(len(val_test_data)*0.3))]
-    #print("lengths = ", lengths)
-    #val_data, test_data = torch.utils.data.random_split(val_test_data, lengths)
+
     train_loader = DataLoader(train_data, batch_size=32, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
-    val_loader = DataLoader(val_data, batch_size=8, num_workers=2,
+    val_loader = DataLoader(val_data, batch_size=10, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
-    test_loader = DataLoader(test_data, batch_size=1, num_workers=2,
+    test_loader = DataLoader(test_data, batch_size=20, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
     list_domain = get_domain_list(cap_dir_train, cap_dir_val)
     #'histograme' 'histograme log' 'histograme tfidf' 'JSD', "embedding", "one hot"
@@ -340,7 +392,7 @@ if __name__ == "__main__":
     lr_monitor_callback = pl.callbacks.LearningRateMonitor()
     checkpoint_callback = ModelCheckpoint(dirpath=save_path, monitor="val_loss with TF", save_top_k=1)
     print('Starting Training')
-    trainer = pl.Trainer(gpus=[7], num_nodes=1, precision=32,
+    trainer = pl.Trainer(gpus=[5], num_nodes=1, precision=32,
                          logger=wandb_logger,
                          #overfit_batches = 1,
                          check_val_every_n_epoch=1,
@@ -349,7 +401,7 @@ if __name__ == "__main__":
                          auto_lr_find=False,
                          callbacks=[lr_monitor_callback, checkpoint_callback],
                          #accelerator='ddp',
-                         max_epochs=60,
+                         max_epochs=50,
                          gradient_clip_val=5.,
                          )
     trainer.tune(model, train_loader, val_loader)

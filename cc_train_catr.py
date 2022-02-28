@@ -14,7 +14,7 @@ from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 import copy
 import numpy as np
-from dataloader_baseline.data_loader_labert import collate_fn, get_dataset
+from baseline_dataloader import collate_fn, get_dataset
 import build_vocab
 from build_vocab import Vocab
 import pickle
@@ -26,33 +26,22 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import datasets
 import dominate
 from dominate.tags import *
-from transformers import BertTokenizer
-from transformers import BertModel
-from baseline.Labert import Generator, LabelSmoothingLoss
-from transformers.models.bert import BertConfig
+from baseline import utils_baseline, caption
+from baseline.configuration import Config
 
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-class baseline(pl.LightningModule):
+class Cart(pl.LightningModule):
     def __init__(self, vocab, lr=5e-5, path_bert='bert.pth'):
-        super(baseline, self).__init__()
-        self.bounderies = ((2,6), (7, 9), (10, 14), (15, 19), (20, 25), (25,60))
+        super(Cart, self).__init__()
         self.vocab = vocab
         self.len_vocab = len(vocab)
         self.lr = lr
         #self.tokenizer = BertTokenizer.from_pretrained('bert-base-cased')
-        self.image_encoder = EncoderCNN()
-        bert_config = BertConfig(vocab_size = len(vocab), type_vocab_size=len(self.bounderies) + 2)
-        self.generator = Generator(bert_config)
-        balance_weight =torch.ones(self.len_vocab, dtype=torch.float32)
-        self.loss = LabelSmoothingLoss(len(vocab), balance_weight, 0.1)
-        self.tokenizer = CustomBertTokenizer.from_pretrained('bert-base-uncased')
-        self.PAD = self.tokenizer.pad_token_id
-        self.MASK = self.tokenizer.mask_token_id
-        self.EOS = self.tokenizer.convert_tokens_to_ids('.')
-        self.num_tokens = self.tokenizer.vocab_size
+        self.captioner, self.criterion = caption.build_model(Config)
+        
         self.metrics = ['bleu', 'meteor', 'rouge']
         self.metrics = [datasets.load_metric(name) for name in self.metrics]
 
@@ -74,27 +63,15 @@ class baseline(pl.LightningModule):
   
     def training_step(self, train_batch, batch_idx):
         images, token_type_ids, input_token_ids, masked_token_ids, domain  = train_batch
-        seq_length = input_token_ids.size(1)
-        batch_size = input_token_ids.size(0)
-        position_ids = torch.arange(seq_length, dtype=torch.long, device=device)
-        position_ids = position_ids.unsqueeze(0).expand_as(input_token_ids)
-        attention_mask = (masked_token_ids != self.PAD).float()
-        mask_position = (masked_token_ids == self.MASK).to(torch.long).view(-1)
-        mask_position = mask_position.nonzero().squeeze()
-
-        padding = torch.zeros([len(images), 1, 1, 49]).to(device)
-        pred_scores = self.forward(images, masked_token_ids, token_type_ids, position_ids, attention_mask, padding)
-        pred_scores = pred_scores[mask_position]
-        gt_token_ids = input_token_ids.view(-1)[mask_position]
-        loss = self.loss(pred_scores, gt_token_ids)
-        bleu1, bleu2, bleu3, bleu4, meteor, rouge, cider = metric_score(gt_token_ids.unsqueeze(0), pred_scores.unsqueeze(0), self.vocab, self.metrics)
+        
+        bleu1, bleu2, bleu3, bleu4, meteor, rouge = metric_score(gt_token_ids.unsqueeze(0), pred_scores.unsqueeze(0), self.vocab, self.metrics)
         self.log('meteor train', meteor)
         self.log('bleu 1 train', bleu1)
         self.log('bleu 2 train', bleu2)
         self.log('bleu 3 train', bleu3)
         self.log('bleu 4 train', bleu4)
         self.log('rouge train', rouge)
-        self.log('cider train', cider)
+
         self.log('train_loss', loss)
         return loss
 
@@ -114,7 +91,7 @@ class baseline(pl.LightningModule):
         pred_scores = pred_scores[mask_position]
         gt_token_ids = input_token_ids.view(-1)[mask_position]
         loss = self.loss(pred_scores, gt_token_ids)
-        bleu1, bleu2, bleu3, bleu4, meteor, rouge, cider = metric_score(gt_token_ids.unsqueeze(0), pred_scores.unsqueeze(0), self.vocab, self.metrics)
+        bleu1, bleu2, bleu3, bleu4, meteor, rouge = metric_score(gt_token_ids.unsqueeze(0), pred_scores.unsqueeze(0), self.vocab, self.metrics)
         self.log('meteor val', meteor)
         self.log('bleu 1 val', bleu1)
         self.log('bleu 2 val', bleu2)
@@ -122,7 +99,6 @@ class baseline(pl.LightningModule):
         self.log('bleu 4 val', bleu4)
         self.log('rouge val', rouge)
         self.log('val_loss', loss)
-        self.log('cider val', cider)
 
     def test_step(self, test_batch, batch_idx):
         images, token_type_ids, input_token_ids, masked_token_ids, domain  = test_batch
@@ -139,14 +115,13 @@ class baseline(pl.LightningModule):
         #pred_scores = pred_scores.contiguous().view(-1, self.num_tokens)
         pred_scores = pred_scores[mask_position]
         gt_token_ids = input_token_ids.view(-1)[mask_position]
-        bleu1, bleu2, bleu3, bleu4, meteor, rouge, cider = metric_score(gt_token_ids.unsqueeze(0), pred_scores.unsqueeze(0), self.vocab, self.metrics)
+        bleu1, bleu2, bleu3, bleu4, meteor, rouge = metric_score(gt_token_ids.unsqueeze(0), pred_scores.unsqueeze(0), self.vocab, self.metrics)
         self.log('meteor test', meteor)
         self.log('bleu 1 test', bleu1)
         self.log('bleu 2 test', bleu2)
         self.log('bleu 3 test', bleu3)
         self.log('bleu 4 test', bleu4)
         self.log('rouge test', rouge)
-        self.log('cider test', cider)
 
 
 if __name__ == "__main__":
@@ -158,7 +133,7 @@ if __name__ == "__main__":
     cap_dir_test = 'data/test_cap_100.txt'
     save_path = "/cortex/users/cohenza4/checkpoint/baseline/"
     # data
-    with open("data/vocab_CC.pkl", 'rb') as f:
+    with open("data/vocab.pkl", 'rb') as f:
         vocab = pickle.load(f)
     train_data = get_dataset(img_dir_train, cap_dir_train, vocab)
     val_data = get_dataset(img_dir_val_test, cap_dir_val, vocab)
@@ -166,9 +141,9 @@ if __name__ == "__main__":
 
     train_loader = DataLoader(train_data, batch_size=32, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
-    val_loader = DataLoader(val_data, batch_size=10, num_workers=2,
+    val_loader = DataLoader(val_data, batch_size=2, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
-    test_loader = DataLoader(test_data, batch_size=20, num_workers=2,
+    test_loader = DataLoader(test_data, batch_size=2, num_workers=2,
                             shuffle=False, collate_fn= collate_fn)
     model = baseline(vocab)                       
     print(model)
@@ -176,7 +151,7 @@ if __name__ == "__main__":
     lr_monitor_callback = pl.callbacks.LearningRateMonitor()
     checkpoint_callback = ModelCheckpoint(dirpath=save_path, monitor="val_loss", save_top_k=1)
     print('Starting Training')
-    trainer = pl.Trainer(gpus=[7], num_nodes=1, precision=32,
+    trainer = pl.Trainer(gpus=[2], num_nodes=1, precision=32,
                          logger=wandb_logger,
                          #overfit_batches = 1,
                          check_val_every_n_epoch=1,

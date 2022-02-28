@@ -1,6 +1,9 @@
 import torch
 from torch import nn
-from transformers import modeling_bert
+from  transformers.models.bert import modeling_bert
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class VLBertEmbeddings(modeling_bert.BertEmbeddings):
     def __init__(self, config):
@@ -10,15 +13,22 @@ class VLBertEmbeddings(modeling_bert.BertEmbeddings):
             nn.Linear(2048, 2048),
             nn.ReLU(inplace=True),
             nn.Linear(2048, config.hidden_size),
-            nn.Dropout(config.hidden_dropout_prob))
+            nn.Dropout(config.hidden_dropout_prob),
+            )
+            
 
 
 
-    def forward(self, images_features, input_token_ids):
+    def forward(self, images_features, input_token_ids, token_type_ids, position_ids):
         image_embed = self.image_embed(images_features)
         words_embeddings = self.word_embeddings(input_token_ids)
+        position_embeddings = self.position_embeddings(position_ids)
+        token_type_embeddings = self.token_type_embeddings(token_type_ids)
         words_embeddings = torch.cat((image_embed, words_embeddings), dim=1)
-        return self.dropout(self.LayerNorm(words_embeddings))
+        position_embeddings = torch.cat((image_embed, position_embeddings), dim=1)
+        token_type_embeddings = torch.cat((image_embed, token_type_embeddings), dim=1)
+        embeddings = words_embeddings + position_embeddings + token_type_embeddings
+        return self.dropout(self.LayerNorm(embeddings))
 
 
 
@@ -40,12 +50,12 @@ class Generator(modeling_bert.BertPreTrainedModel):
         self.load_state_dict(state_dict, strict=False)
         del state_dict
 
-    def forward(self, images_features, input_token_ids, attention_mask):
-        embeddings = self.embedding_layer(images_features, input_token_ids)
-
+    def forward(self, images_features, masked_token_ids, token_type_ids, position_ids, attention_mask, padding):
+        embeddings = self.embedding_layer(images_features, masked_token_ids, token_type_ids, position_ids)
+  
         attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        attention_mask = torch.cat((attention_mask, padding), dim=3)
         attention_mask = (1.0 - attention_mask) * -10000.0
-
         hidden_states = self.encoder(embeddings, attention_mask, self.head_mask)[0]
         return self.classifier(hidden_states)
 
@@ -71,9 +81,13 @@ class LabelSmoothingLoss(nn.Module):
         with torch.no_grad():
             true_dist = torch.zeros_like(pred)
             true_dist.fill_(self.smoothing / (self.classes - 1))
-            true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
+            try:
+                true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
+            except IndexError:
+                true_dist = true_dist
+                
 
-        weight = self.weight[target]
+        weight = self.weight[target].to(device)
         weighted_loss = torch.sum(-true_dist * pred, dim=-1) * weight
 
         return torch.mean(weighted_loss) * weight.numel() / weight.sum()

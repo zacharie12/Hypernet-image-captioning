@@ -17,6 +17,9 @@ from scipy.spatial import distance
 from sklearn.manifold import TSNE
 from math import log
 from transformers import BertTokenizer
+from cider import Cider
+from ptbtokenizer import PTBTokenizer
+from collections import defaultdict
 
 def flip_parameters_to_tensors(module):
     attr = []
@@ -186,6 +189,26 @@ def cap_to_text_gt(cap, voc, tokenized=False):
     else:
         return " ".join(sent)
 
+
+def cap_to_text_gt_batch(cap, voc, tokenized=False):
+    out = []
+    for j in range(len(cap)):
+        sent = []
+        for i in range(len(cap[j])):
+            caption = cap[j]
+            word = voc.i2w[caption[i].item()]
+            if word == '<pad>' or word == '<s>' :
+                continue
+            if word == '</s>':
+                break
+            sent.append(word)
+        if tokenized:
+            out.append(sent)
+        else:
+            out.append(" ".join(sent))
+    return out
+
+
 def cap_to_text_gt_viz(cap, voc, tokenized=False):
     cap = cap[0]
     sent = []
@@ -204,6 +227,7 @@ def cap_to_text_gt_viz(cap, voc, tokenized=False):
 
 
 def metric_score(gt_caps, pred_caps, vocab, metrics):
+    Cider_scoreur = Cider()
 
     tokenized_hyp_batch = []
     tokenized_ref_batch = []
@@ -240,12 +264,25 @@ def metric_score(gt_caps, pred_caps, vocab, metrics):
         elif metric.name == 'rouge':
             metric.add_batch(predictions=hyp_batch, references=ref_batch)
             output.append(metric.compute()['rougeL'][1][2])
-            #output.append(0.0)
-    
+            #output.append(0.0)        
+    gts = defaultdict(list)
+    res = []
+    for i in range(len(tokenized_hyp_batch)):
+        #gts[i].append({"caption": tokenized_ref_text[i]})
+        #res[i].append({"caption": tokenized_hyp_text[i]})
+        double_list_gt = tokenized_ref_batch[i]
+        list_gt = double_list_gt[0]
+        str_gt = ' '.join(list_gt)
+        str_hyp = ' '.join(tokenized_hyp_batch[i])
+        gts[i].append(str_gt)
+        res.append({'image_id': i, 'caption': [str_hyp]})
+    score, scores = Cider_scoreur.compute_score(gts, res)
+    output.append(score)
+        
     return output
 
 def metric_score_test(gt_caps, pred_caps, vocab, metrics):
-
+    Cider_scoreur = Cider()
     tokenized_hyp_batch = []
     tokenized_ref_batch = []
     hyp_batch = []
@@ -280,7 +317,19 @@ def metric_score_test(gt_caps, pred_caps, vocab, metrics):
         elif metric.name == 'rouge':
             metric.add_batch(predictions=hyp_batch, references=ref_batch)
             output.append(metric.compute()['rougeL'][1][2])
-            #output.append(0.0)
+    gts = defaultdict(list)
+    res = []
+    for i in range(len(tokenized_hyp_batch)):
+        #gts[i].append({"caption": tokenized_ref_text[i]})
+        #res[i].append({"caption": tokenized_hyp_text[i]})
+        double_list_gt = tokenized_ref_batch[i]
+        list_gt = double_list_gt[0]
+        str_gt = ' '.join(list_gt)
+        str_hyp = ' '.join(tokenized_hyp_batch[i])
+        gts[i].append(str_gt)
+        res.append({'image_id': i, 'caption': [str_hyp]})
+    score, scores = Cider_scoreur.compute_score(gts, res)
+    output.append(score)
     
     return output
 
@@ -309,11 +358,12 @@ def get_domain_list(cap_dir1, cap_dir2):
         for line in lines:
             x = line.split("     ")
             domains.append(x[2])
-    with open(cap_dir2, 'r') as f:
-        lines = f.readlines()
-        for line in lines:
-            x = line.split("     ")
-            domains.append(x[2])
+    if len(cap_dir2) !=0:
+        with open(cap_dir2, 'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                x = line.split("     ")
+                domains.append(x[2])
     domains = list(dict.fromkeys(domains))
     return domains
 
@@ -370,9 +420,13 @@ def tfidf_hist(cap_dir1, vocab, list_domain):
     return tfidf_perdomain
 
 
-def get_jsd_tsne(cap_dir1, vocab, list_domain, num_domain, n_tsne):
+def get_jsd_tsne(cap_dir1, vocab, list_domain, num_domain, n_tsne, zero_shot=False, list_zeroshot=[]):
     tsne_domain = {}
+    test_file = 'data/one_shot_captions.txt'
     counter_per_domain = get_hist_embedding(cap_dir1, vocab, list_domain, False)
+    if zero_shot:
+        dict_zero_shot = get_hist_embedding(test_file, vocab, list_zeroshot, False)
+        counter_per_domain.update(dict_zero_shot)
     domain_list = list(counter_per_domain.keys())
     domains_hist = list(counter_per_domain.values())
     mat_dist = np.zeros((num_domain, num_domain))
@@ -443,8 +497,8 @@ class CustomBertTokenizer(BertTokenizer):
                 tokens.append(self._convert_id_to_token(index))
         return tokens
 
-tokenizer = CustomBertTokenizer.from_pretrained('.cache/')
-PAD = tokenizer.pad_token_id
-MASK = tokenizer.mask_token_id
-EOS = tokenizer.convert_tokens_to_ids('.')
-num_tokens = tokenizer.vocab_size
+
+
+
+
+
